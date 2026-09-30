@@ -90,7 +90,7 @@ export default function SitingPage() {
         setReportState("error");
         return;
       }
-      setModel(res.headers.get("X-Model") ?? "");
+      setModel(`${res.headers.get("X-Model") ?? ""} · ${res.headers.get("X-Provider") === "gemini" ? "Gemini 무료 API" : "로컬 실행 · 무료"}`);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       for (;;) {
@@ -335,7 +335,7 @@ export default function SitingPage() {
           <section className="panel wide report">
             <header className="panel-head">
               <h2>⑥ AI 검토 의견</h2>
-              <span className="muted">{model ? `${model} · 로컬 실행 · 무료` : "로컬 LLM (Ollama)"}</span>
+              <span className="muted">{model || "무료 LLM (로컬 Ollama 또는 Gemini)"}</span>
             </header>
             <button className="btn primary" onClick={writeReport} disabled={reportState === "streaming"}>
               {reportState === "streaming" ? "작성 중…" : reportState === "idle" ? "조례 조문을 읽고 의견서 작성" : "다시 작성"}
@@ -343,7 +343,7 @@ export default function SitingPage() {
             <div className={`report-body ${reportState === "error" ? "error" : ""}`}>
               {report
                 ? renderMarkdown(report)
-                : reportState === "idle" && <p className="muted">토지 정보, 판정 결과, 조례 조문을 로컬 LLM에 넘겨 예외 조항과 인허가 절차를 정리합니다.</p>}
+                : reportState === "idle" && <p className="muted">토지 정보, 판정 결과, 조례 조문을 무료 LLM에 넘겨 예외 조항과 인허가 절차를 정리합니다.</p>}
               {reportState === "streaming" && <span className="cursor" />}
             </div>
           </section>

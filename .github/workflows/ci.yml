@@ -1,0 +1,21 @@
+# push·PR마다 타입 검사와 프로덕션 빌드를 돌린다. 배포는 Vercel이 GitHub 연동으로 따로 한다
+# (main → 프로덕션, 그 밖의 브랜치·PR → 미리보기 URL).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx next build

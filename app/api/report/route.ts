@@ -1,6 +1,6 @@
-// 로컬 Ollama(무료 LLM)에 관제 데이터를 넘겨 점검 보고서를 받아 스트리밍한다.
+// 무료 LLM(로컬 Ollama 또는 Gemini)에 관제 데이터를 넘겨 점검 보고서를 받아 스트리밍한다.
 
-import { streamChat } from "@/lib/ollama";
+import { streamChat } from "@/lib/llm";
 
 type ReportInput = {
   total: number;
