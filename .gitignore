@@ -8,3 +8,6 @@ ml/.venv
 ml/data
 __pycache__
 device/.venv
+.vercel
+.env*
+!.env.example
