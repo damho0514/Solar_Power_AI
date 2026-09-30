@@ -73,7 +73,7 @@ export default function ReportPanel({ buildInput }: Props) {
         setState("error");
         return;
       }
-      setModel(res.headers.get("X-Model") ?? "");
+      setModel(`${res.headers.get("X-Model") ?? ""} · ${res.headers.get("X-Provider") === "gemini" ? "Gemini 무료 API" : "로컬 실행 · 무료"}`);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       for (;;) {
@@ -95,7 +95,7 @@ export default function ReportPanel({ buildInput }: Props) {
       <header className="panel-head">
         <h2>⑤ AI 점검 보고서</h2>
         <span className="muted">
-          {model ? `${model} · 로컬 실행 · 무료` : "로컬 LLM (Ollama)"}
+          {model || "무료 LLM (로컬 Ollama 또는 Gemini)"}
           {state !== "idle" && ` · ${elapsed.toFixed(1)}초`}
         </span>
       </header>
@@ -103,7 +103,7 @@ export default function ReportPanel({ buildInput }: Props) {
         {state === "streaming" ? "작성 중…" : state === "idle" ? "지금 상태로 보고서 작성" : "다시 작성"}
       </button>
       <div className={`report-body ${state === "error" ? "error" : ""}`}>
-        {text ? renderMarkdown(text) : state === "idle" && <p className="muted">현재 관제 데이터를 로컬 LLM에 넘겨 유지보수 보고서를 받습니다.</p>}
+        {text ? renderMarkdown(text) : state === "idle" && <p className="muted">현재 관제 데이터를 무료 LLM에 넘겨 유지보수 보고서를 받습니다.</p>}
         {state === "streaming" && <span className="cursor" />}
       </div>
     </section>

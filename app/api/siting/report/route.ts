@@ -1,7 +1,7 @@
 // 토지 정보·법령 판정·조례 조문을 로컬 LLM에 넘겨 태양광 입지 검토 의견서를 받아 스트리밍한다.
 // 판정 결과는 규칙으로 이미 정해져 있고, LLM은 조례 조문을 읽고 예외·추가 조건을 풀어 설명하는 역할이다.
 
-import { streamChat } from "@/lib/ollama";
+import { streamChat } from "@/lib/llm";
 import { LEVEL_LABEL, TARGET_LABEL, type Distances, type Finding, type Land, type Level, type Setback } from "@/lib/siting";
 import type { Article } from "@/lib/ordinance";
 
