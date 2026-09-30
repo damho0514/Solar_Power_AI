@@ -1,0 +1,9 @@
+# 라즈베리파이·노트북 공통
+paho-mqtt>=2.0
+numpy
+opencv-python-headless
+ai-edge-litert
+# 라즈베리파이 실물 센서용 (노트북 --simulate 모드에서는 필요 없음)
+# pi-ina219      # 전압·전류 센서 INA219 (I2C)
+# gpiozero       # LED 드라이버 PWM 제어
+# picamera2      # CSI 카메라 모듈 (apt install python3-picamera2 권장)
