@@ -4,6 +4,9 @@
 const GEMINI_KEY = process.env.GEMINI_API_KEY ?? "";
 // "-latest" 별칭은 Google이 최신 Flash 모델로 바꿔 가리키므로 모델이 은퇴해도 코드를 고칠 필요가 없다
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-flash-latest";
+// 무료 API는 사용량이 몰리면 503·429를 돌려준다. 그때는 가벼운 모델로 한 번 더 시도한다.
+const GEMINI_FALLBACK = process.env.GEMINI_FALLBACK_MODEL ?? "gemini-flash-lite-latest";
+const RETRYABLE = new Set([404, 429, 500, 503]);
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "gemma3:4b";
 
@@ -40,25 +43,29 @@ function textStream(body: ReadableStream<Uint8Array>, pick: (line: string) => st
 }
 
 async function streamGemini(prompt: string, options: Options): Promise<Response> {
-  let upstream: Response;
-  try {
-    upstream = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse`,
-      {
+  let upstream: Response | null = null;
+  let model = GEMINI_MODEL;
+  for (const m of [GEMINI_MODEL, GEMINI_FALLBACK]) {
+    model = m;
+    try {
+      upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:streamGenerateContent?alt=sse`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           generationConfig: { temperature: options.temperature ?? 0.3 },
         }),
-      },
-    );
-  } catch {
-    return new Response("Gemini API에 연결할 수 없습니다.", { status: 503 });
+      });
+    } catch {
+      upstream = null;
+      continue;
+    }
+    if (upstream.ok || !RETRYABLE.has(upstream.status)) break;
   }
+  if (!upstream) return new Response("Gemini API에 연결할 수 없습니다.", { status: 503 });
   if (!upstream.ok || !upstream.body) {
     const msg = await upstream.text();
-    const hint = upstream.status === 429 ? "\n무료 사용 한도를 넘었습니다. 잠시 뒤 다시 시도하세요." : "";
+    const hint = RETRYABLE.has(upstream.status) ? "\n무료 API 사용량이 몰렸거나 한도를 넘었습니다. 잠시 뒤 다시 시도하세요." : "";
     return new Response(`Gemini 오류 (${upstream.status}): ${msg}${hint}`, { status: 502 });
   }
 
@@ -68,7 +75,7 @@ async function streamGemini(prompt: string, options: Options): Promise<Response>
     const json = JSON.parse(line.slice(5)) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
     return json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("");
   });
-  return new Response(stream, { headers });
+  return new Response(stream, { headers: { ...headers, "X-Model": model } });
 }
 
 async function streamOllama(prompt: string, options: Options): Promise<Response> {
