@@ -1,0 +1,138 @@
+{
+  "rows": {
+    "train": 370656,
+    "test": 123552
+  },
+  "methods": {
+    "rule": {
+      "events": 58,
+      "detected": 51,
+      "detection_rate": 0.8793103448275862,
+      "median_latency_min": 24.0,
+      "false_alarms_per_lamp_day": 0.0,
+      "detection_rate_by_kind": {
+        "driver": 0.9565217391304348,
+        "overheat": 1.0,
+        "voltage": 0.6666666666666666
+      },
+      "median_latency_by_kind": {
+        "driver": 20.5,
+        "overheat": 24.0,
+        "voltage": 27.5
+      },
+      "detection_rate_by_severity": {
+        "약함": 0.5714285714285714,
+        "중간": 0.9473684210526315,
+        "강함": 1.0
+      },
+      "row_alarm_rate_on_faults": 0.7196002770357178
+    },
+    "iforest": {
+      "events": 58,
+      "detected": 14,
+      "detection_rate": 0.2413793103448276,
+      "median_latency_min": 40.0,
+      "false_alarms_per_lamp_day": 0.7996826656088853,
+      "detection_rate_by_kind": {
+        "driver": 0.13043478260869565,
+        "overheat": 0.35294117647058826,
+        "voltage": 0.2777777777777778
+      },
+      "median_latency_by_kind": {
+        "driver": 21.0,
+        "overheat": 31.5,
+        "voltage": 50.0
+      },
+      "detection_rate_by_severity": {
+        "약함": 0.21428571428571427,
+        "중간": 0.15789473684210525,
+        "강함": 0.32
+      },
+      "row_alarm_rate_on_faults": 0.007123775601068566
+    },
+    "zscore": {
+      "events": 58,
+      "detected": 52,
+      "detection_rate": 0.896551724137931,
+      "median_latency_min": 18.0,
+      "false_alarms_per_lamp_day": 0.05077350257834193,
+      "detection_rate_by_kind": {
+        "driver": 0.9565217391304348,
+        "overheat": 0.7647058823529411,
+        "voltage": 0.9444444444444444
+      },
+      "median_latency_by_kind": {
+        "driver": 18.0,
+        "overheat": 29.0,
+        "voltage": 9.0
+      },
+      "detection_rate_by_severity": {
+        "약함": 0.7142857142857143,
+        "중간": 0.8947368421052632,
+        "강함": 1.0
+      },
+      "row_alarm_rate_on_faults": 0.775403185910755
+    },
+    "rf_raw": {
+      "events": 58,
+      "detected": 57,
+      "detection_rate": 0.9827586206896551,
+      "median_latency_min": 9.0,
+      "false_alarms_per_lamp_day": 0.0634668782229274,
+      "detection_rate_by_kind": {
+        "driver": 0.9565217391304348,
+        "overheat": 1.0,
+        "voltage": 1.0
+      },
+      "median_latency_by_kind": {
+        "driver": 9.0,
+        "overheat": 21.0,
+        "voltage": 1.5
+      },
+      "detection_rate_by_severity": {
+        "약함": 1.0,
+        "중간": 0.9473684210526315,
+        "강함": 1.0
+      },
+      "row_alarm_rate_on_faults": 0.9465716829919858
+    },
+    "rf": {
+      "events": 58,
+      "detected": 57,
+      "detection_rate": 0.9827586206896551,
+      "median_latency_min": 11.0,
+      "false_alarms_per_lamp_day": 0.0,
+      "detection_rate_by_kind": {
+        "driver": 0.9565217391304348,
+        "overheat": 1.0,
+        "voltage": 1.0
+      },
+      "median_latency_by_kind": {
+        "driver": 11.0,
+        "overheat": 23.0,
+        "voltage": 3.5
+      },
+      "detection_rate_by_severity": {
+        "약함": 1.0,
+        "중간": 0.9473684210526315,
+        "강함": 1.0
+      },
+      "row_alarm_rate_on_faults": 0.9352923716236272
+    }
+  },
+  "rf_feature_importance": {
+    "v_std": 0.16132679455013904,
+    "v_range": 0.21626644921172655,
+    "temp_gap": 0.22352485334629796,
+    "temp_gap_slope": 0.03554903203281183,
+    "cur_ratio": 0.3287351632061087,
+    "cur_ratio_slope": 0.03186675932577339,
+    "brightness": 0.00273094832714262
+  },
+  "iforest_threshold": -0.6360954564731778,
+  "zscore_threshold": 14.272224470524755,
+  "persist": {
+    "zscore": 5,
+    "rf": 3
+  }
+}
