@@ -1,0 +1,8 @@
+# CLI로 배포할 때 올리지 않을 것 (GitHub 연동 배포는 저장소 내용만 쓴다)
+ml
+device
+.next
+node_modules
+*.tsbuildinfo
+.env*
+!.env.example
