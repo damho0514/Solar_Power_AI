@@ -23,21 +23,26 @@ type Props = ComponentProps<typeof StreetMap> & { targets: MapTarget[]; view?: P
 type Mode = "3d" | "2d";
 const KEY = "damo.mapMode";
 
-function webgl() {
+// 3D(three.js)는 WebGL2가 필요하다. 안 되면 이유를 구분해 안내한다.
+function webglSupport(): "ok" | "webgl1" | "none" {
   try {
-    return !!document.createElement("canvas").getContext("webgl2");
+    const c = document.createElement("canvas");
+    if (c.getContext("webgl2")) return "ok";
+    return c.getContext("webgl") ? "webgl1" : "none";
   } catch {
-    return false;
+    return "none";
   }
 }
 
 export default function MapView({ view, ...props }: Props) {
   const [mode, setMode] = useState<Mode | null>(null);
-  const [can3d, setCan3d] = useState(true);
+  const [support, setSupport] = useState<"ok" | "webgl1" | "none">("ok");
+  const can3d = support === "ok";
 
   useEffect(() => {
-    const ok = webgl();
-    setCan3d(ok);
+    const sup = webglSupport();
+    setSupport(sup);
+    const ok = sup === "ok";
     let saved: Mode | null = null;
     try {
       saved = localStorage.getItem(KEY) as Mode | null;
@@ -55,13 +60,34 @@ export default function MapView({ view, ...props }: Props) {
   return (
     <div className="mapview">
       <div className="seg-mini" role="radiogroup" aria-label="지도 보기 방식">
-        <button role="radio" aria-checked={mode === "3d"} className={mode === "3d" ? "on" : ""} disabled={!can3d} onClick={() => choose("3d")}>
+        <button
+          role="radio"
+          aria-checked={mode === "3d"}
+          className={mode === "3d" ? "on" : ""}
+          disabled={!can3d}
+          title={can3d ? undefined : "이 브라우저에서는 3D를 쓸 수 없어요"}
+          onClick={() => choose("3d")}
+        >
           3D
         </button>
         <button role="radio" aria-checked={mode === "2d"} className={mode === "2d" ? "on" : ""} onClick={() => choose("2d")}>
           2D
         </button>
       </div>
+      {!can3d && (
+        <div className="no3d" role="note">
+          <b>3D를 쓸 수 없어 2D로 보여 드려요</b>
+          <p>
+            {support === "none"
+              ? "이 브라우저의 그래픽 가속(WebGL)이 꺼져 있어요. 크롬이면 설정 → 시스템 → '가능한 경우 그래픽 가속 사용'을 켜고 브라우저를 다시 시작하세요. chrome://gpu 에서 WebGL2가 'Hardware accelerated'인지 확인할 수 있어요."
+              : "이 기기의 그래픽(WebGL1)이 오래돼 3D(WebGL2)를 지원하지 않아요. 최신 크롬·엣지·사파리에서 열어 보세요."}
+          </p>
+          <p>VS Code 안의 미리보기 창은 그래픽 가속이 막혀 있을 수 있어요. 일반 브라우저 창에서 열어 주세요.</p>
+          <button className="btn small" onClick={() => location.reload()}>
+            설정을 바꿨다면 다시 확인
+          </button>
+        </div>
+      )}
       {mode === "3d" ? (
         <Street3D
           lamps={props.lamps}
