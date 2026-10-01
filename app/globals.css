@@ -2385,3 +2385,161 @@ button {
   height: 100%;
   object-fit: contain;
 }
+
+/* ---------- 3D 도로 ---------- */
+
+.mapview {
+  position: relative;
+}
+
+.seg-mini {
+  position: absolute;
+  z-index: 5;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(10, 15, 26, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.seg-mini button {
+  min-width: 40px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #9aa6bd;
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.seg-mini button.on {
+  background: var(--amber);
+  color: #1a1300;
+}
+
+.seg-mini button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.street3d {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  max-height: 68vh;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0a1222;
+  touch-action: none; /* 지도를 돌리는 동안 페이지가 스크롤되지 않게 */
+}
+
+@media (max-width: 640px) {
+  .street3d {
+    aspect-ratio: 4 / 5;
+    max-height: 62vh;
+  }
+}
+
+.loading3d {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #9aa6bd;
+  font-size: 13px;
+}
+
+.view3d-bar {
+  position: absolute;
+  z-index: 5;
+  left: 10px;
+  bottom: 30px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: calc(100% - 20px);
+}
+
+.view3d-bar button {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(10, 15, 26, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #dbe3f1;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.view3d-bar button.on {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.view3d-hint {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  margin: 0;
+  font-size: 11px;
+  color: #6b7890;
+  pointer-events: none;
+}
+
+.tag3d-wrap {
+  pointer-events: none;
+}
+
+.tag3d {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: rgba(10, 15, 26, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e8edf6;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  transform: translateZ(0);
+}
+
+.tag3d.ai {
+  border-color: #22d3ee;
+  color: #a5f3fc;
+}
+
+.tag3d.ai::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #22d3ee;
+  vertical-align: 1px;
+}
+
+.tag3d.bad {
+  border-color: #ef4444;
+  background: rgba(127, 29, 29, 0.85);
+  color: #fecaca;
+}
+
+.tag3d.ghost {
+  color: #94a3b8;
+  border-style: dashed;
+}
+
+.tag3d.sign {
+  background: rgba(255, 196, 0, 0.9);
+  color: #1a1300;
+  border: 0;
+}

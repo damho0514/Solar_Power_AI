@@ -7,10 +7,12 @@ import { FRAME_WIDTH_M, speedKmh, type CameraFrame } from "@/components/CameraPa
 import DevicePanel, { type DeviceView } from "@/components/DevicePanel";
 import Icon, { type IconName } from "@/components/Icon";
 import LampDetail, { KIND_LABEL } from "@/components/LampDetail";
+import MapView from "@/components/MapView";
 import ReportPanel from "@/components/ReportPanel";
 import SchoolZonePanel from "@/components/SchoolZonePanel";
 import SolarPanel, { type SolarSummary } from "@/components/SolarPanel";
 import StreetMap from "@/components/StreetMap";
+import type { Preset } from "@/components/Street3D";
 import TrafficChart from "@/components/TrafficChart";
 import { LABELS } from "@/lib/detectors";
 import { connectDevices, type DeviceLink } from "@/lib/device";
@@ -175,7 +177,7 @@ export default function Home() {
       if (e.kind !== "crossing") linkRef.current?.sendEvent(SITE.id, toOutbound(e, clip));
     });
     // 개발 모드 QA용: 브라우저 콘솔에서 가짜 사건을 넣어 영상 저장·연동을 시험한다
-    if (process.env.NODE_ENV === "development") Object.assign(window, { __damo: { zone: zoneRef.current, recorder: recorderRef.current, cc: ccRef.current } });
+    if (process.env.NODE_ENV === "development") Object.assign(window, { __damo: { zone: zoneRef.current, recorder: recorderRef.current, cc: ccRef.current, brain: brainRef.current } });
     setReady(true);
     loadModels()
       .then((m) => {
@@ -414,7 +416,20 @@ export default function Home() {
     })),
   });
 
-  const map = (compact = false) => (
+  // 관제·스쿨존·시설 탭은 3D/2D를 고를 수 있는 지도, 카메라 창 구석은 가벼운 2D 지도
+  const mapProps = {
+    lamps,
+    walkers: walkersRef.current,
+    selectedId,
+    onSelect: select,
+    targets: view.targets,
+    alert: mapAlert,
+    sign,
+    rtSign,
+    limit: policy.limit,
+  };
+  const map = (preset: Preset = "all") => <MapView {...mapProps} view={preset} />;
+  const insetMap = () => (
     <StreetMap
       lamps={lamps}
       walkers={walkersRef.current}
@@ -425,7 +440,7 @@ export default function Home() {
       sign={sign}
       rtSign={rtSign}
       limit={policy.limit}
-      compact={compact}
+      compact
     />
   );
 
@@ -578,7 +593,7 @@ export default function Home() {
               sign={sign}
               rtSign={rtSign}
               onChange={() => force((n) => n + 1)}
-              map={map()}
+              map={map("zone")}
               recorder={recorderRef.current!}
               link={ccRef.current}
               vmsDevices={[...devRef.current.vms.entries()].map(([id, online]) => ({ id, online }))}
@@ -714,7 +729,7 @@ export default function Home() {
         onFrame={onFrame}
         onView={onCamView}
         onShowMap={() => setTab("live")}
-        inset={map(true)}
+        inset={insetMap()}
         privacy={zone.settings.privacy}
         recorder={recorderRef.current ?? undefined}
         alert={sign.level === "danger" || sign.level === "slow" ? `${sign.text} · ${sign.sub}` : null}
