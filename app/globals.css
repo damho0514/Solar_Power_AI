@@ -2543,3 +2543,22 @@ button {
   color: #1a1300;
   border: 0;
 }
+
+.no3d {
+  margin-bottom: 10px;
+  padding: 12px 108px 12px 14px; /* 오른쪽 위 3D/2D 버튼 자리 */
+  border-radius: 12px;
+  background: var(--warn-soft);
+  font-size: 13.5px;
+}
+
+.no3d b {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--warn);
+}
+
+.no3d p {
+  margin-bottom: 6px;
+  color: var(--text-2);
+}
