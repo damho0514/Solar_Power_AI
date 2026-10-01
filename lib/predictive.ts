@@ -8,7 +8,7 @@ import { TrafficForecaster, idleLevelFor } from "./forecast";
 import { MAP_W, camToMapX, camZone, type CameraCtx } from "./sim";
 import { isMoving, predict, type Track } from "./tracker";
 
-export type MapTarget = { key: string; x: number; aheadX: number | null; kind: "person" | "vehicle"; ghost: boolean };
+export type MapTarget = { key: string; x: number; aheadX: number | null; kind: "person" | "vehicle"; ghost: boolean; label: string; id: number };
 
 type Ghost = { id: number; label: string; kind: Track["kind"]; x0: number; v: number; t0: number };
 
@@ -103,12 +103,12 @@ export class PredictiveLighting {
         for (let s = 0.5; s <= 3; s += 0.5) points.push(camToMapX(predict(t, s).x));
         aheadX = camToMapX(predict(t, 3).x);
       }
-      targets.push({ key: `t${t.id}`, x, aheadX, kind: t.kind, ghost: false });
+      targets.push({ key: `t${t.id}`, x, aheadX, kind: t.kind, ghost: false, label: t.label, id: t.id });
     }
     for (const g of this.ghosts) {
       const x = gx(g);
       points.push(x, x + g.v, x + g.v * 2);
-      targets.push({ key: `g${g.id}`, x, aheadX: x + g.v * 2, kind: g.kind, ghost: true });
+      targets.push({ key: `g${g.id}`, x, aheadX: x + g.v * 2, kind: g.kind, ghost: true, label: g.label, id: g.id });
     }
 
     const ctx: CameraCtx = { seeing: now - this.lastSeen < HOLD_MS, points, idle: idle.level };
