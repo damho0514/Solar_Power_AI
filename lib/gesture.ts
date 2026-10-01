@@ -1,6 +1,6 @@
 // 손동작으로 카메라 위치를 실시간 조종한다. 클릭 없이 손만 쓴다.
-// - 🖐 손을 편 채 움직이면: 카메라가 손을 실시간으로 따라 이동
-// - ✊ 주먹을 쥐면: 그 자리에서 정지 (주먹 쥔 채 움직여도 가만히 있고, 다시 펴면 그 자리부터 따라간다)
+// - 🤏 엄지·검지를 붙인 채 움직이면: 카메라가 손을 실시간으로 따라 이동
+// - 🖐 손을 펴면: 그 자리에서 정지 (다시 집으면 그 자리부터 이어서)
 // - ✌️ 브이를 1초 유지하면: 원래 자리로
 // 손 인식 AI는 두 가지 중 되는 것을 쓴다.
 // 1. MediaPipe GestureRecognizer: 손동작까지 학습된 모델. WebGL이 필요하다.
@@ -172,17 +172,23 @@ export class GestureController {
   private cand: { g: Gesture; n: number } | null = null;
   private follow: { anchor: Point; from: View } | null = null;
   private hold: { since: number; fired: boolean } | null = null;
+  private pinch = false;
   private mode: Mode = "none";
 
   constructor(private opts: ControlOptions) {}
 
+  // 집었을 때만 따라 움직인다 (지도 손동작 lib/mapGesture.ts와 같은 원칙).
+  // 🤏 엄지·검지를 붙인 채 옮기면 카메라 구간이 따라오고, 손을 펴면 그 자리에 멈춘다. ✌️ 1초 유지 = 원래 자리.
   update(f: HandFrame, now: number, view: View): Step {
     if (!f) {
       if (now - this.seenAt > LOST_GRACE_MS) this.forget();
       return { view, mode: this.mode, palm: this.palm, hold: null };
     }
     this.seenAt = now;
-    const raw = palmCenter(f.lm);
+    const size = Math.max(1e-6, Math.hypot(f.lm[0].x - f.lm[9].x, f.lm[0].y - f.lm[9].y));
+    const r = Math.hypot(f.lm[4].x - f.lm[8].x, f.lm[4].y - f.lm[8].y) / size;
+    this.pinch = this.pinch ? r < 0.46 : r < 0.3;
+    const raw = this.pinch ? { x: (f.lm[4].x + f.lm[8].x) / 2, y: (f.lm[4].y + f.lm[8].y) / 2 } : palmCenter(f.lm);
     this.palm = this.palm
       ? { x: this.palm.x + (raw.x - this.palm.x) * SMOOTH, y: this.palm.y + (raw.y - this.palm.y) * SMOOTH }
       : raw;
@@ -193,15 +199,8 @@ export class GestureController {
     if (this.cand.n >= STABLE_FRAMES || this.stable === null) this.stable = this.cand.g;
     const g = this.stable;
 
-    // ✊ 정지: 지금 자리에서 멈춘다. 다시 손을 펴면 그때 손 위치를 새 기준으로 삼아 튀지 않는다
-    if (g === "fist") {
-      this.follow = null;
-      this.hold = null;
-      return this.step(view, "stop", p, null);
-    }
-
     // ✌️ 1초 유지: 원래 자리
-    if (g === "victory") {
+    if (!this.pinch && g === "victory") {
       this.follow = null;
       this.hold ??= { since: now, fired: false };
       if (this.hold.fired) return this.step(view, "stop", p, null);
@@ -212,8 +211,13 @@ export class GestureController {
     }
     this.hold = null;
 
-    // 🖐 따라가기: 손이 움직인 만큼 카메라를 옮긴다 (마우스처럼 상대 이동)
-    // 다시 따라가기 시작할 때는 평활 값에 남은 이전 손 위치 때문에 튀지 않도록 지금 위치에서 새로 시작한다
+    // 손을 펴고 있으면 멈춤 (커서만). 다시 집으면 그때 손 위치를 새 기준으로 삼아 튀지 않는다
+    if (!this.pinch) {
+      this.follow = null;
+      return this.step(view, "stop", p, null);
+    }
+
+    // 🤏 따라가기: 손이 움직인 만큼 카메라를 옮긴다 (마우스처럼 상대 이동)
     if (!this.follow) {
       this.palm = raw;
       this.follow = { anchor: raw, from: view };

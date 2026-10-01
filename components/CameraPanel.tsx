@@ -33,8 +33,8 @@ const HOME: View = { x: CAM_HOME_POS, y: 0, zoom: 1 };
 
 const MODE_TEXT: Record<Mode, string> = {
   none: "손을 보여 주면 카메라 구간을 옮길 수 있어요",
-  follow: "🖐 손을 따라 이동 중",
-  stop: "✊ 멈춤",
+  follow: "🤏 손을 따라 이동 중 · 손을 펴면 멈춰요",
+  stop: "🖐 멈춤 · 🤏 집으면 옮길 수 있어요",
   "reset-hold": "✌️ 원래 자리로…",
 };
 
@@ -75,7 +75,6 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
   // 손동작 대상이 "지도"이면 지도 뷰어(3D·로드뷰·2D)를 조작한다
   const mapCtrlRef = useRef(new MapGestureController());
   const [mapMode, setMapMode] = useState<MapMode>("none");
-  const [snapPending, setSnapPending] = useState(0);
   const { target: handTarget, road } = useHandState();
   const [toast, setToast] = useState<{ text: string; id: number } | null>(null);
 
@@ -218,7 +217,6 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
             const step = mapCtrlRef.current.update(hands, now);
             handBus.publish(step);
             setMapMode(step.mode);
-            setSnapPending(step.snap?.pending ?? 0);
             if (step.toast) setToast({ text: step.toast, id: now });
           } else {
             const step = control.update(hands[0] ?? null, now, viewRef.current);
@@ -278,7 +276,7 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
         {gestures && (
           <>
             {handTarget === "map" ? (
-              <span className={`camera-hud${mapMode === "none" ? "" : " on"}`}>{modeText(mapMode, road, snapPending)}</span>
+              <span className={`camera-hud${mapMode === "none" ? "" : " on"}`}>{modeText(mapMode, road)}</span>
             ) : (
               <>
                 <span className={`camera-hud${mode === "none" ? "" : " on"}`}>{MODE_TEXT[mode]}</span>
@@ -326,17 +324,16 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
           <div className="camera-help" onClick={() => setHelp(false)}>
             {handTarget === "map" ? (
               <>
-                <p><b>🖐 손 펴고 움직이기</b> 지도를 돌려요 (2D는 이동)</p>
-                <p><b>🤏 집고 끌기</b> 지도를 잡고 옮겨요 (로드뷰는 걷기)</p>
-                <p><b>🤏🤏 두 손 집고 벌리기</b> 확대 · 모으면 축소 · 비틀면 회전</p>
-                <p><b>👍 / 👎</b> 확대 / 축소</p>
-                <p><b>✊ 주먹</b> 멈춤 (손을 옮긴 뒤 다시 펴면 이어서)</p>
-                <p><b>✌️ 1초 유지</b> 처음 시점으로</p>
+                <p className="muted">집었을 때만 움직여요. 손을 펴면 커서만 따라와요.</p>
+                <p><b>🤏 한 손 집고 끌기</b> 회전 (로드뷰는 둘러보기)</p>
+                <p><b>🤏🤏 두 손 집기</b> 벌리면 확대·모으면 축소·함께 옮기면 이동 (로드뷰는 앞뒤·옆걸음)</p>
+                <p><b>✌️ 1초 유지</b> 다음 시점</p>
+                <p><b>👍 1초 유지</b> 처음 시점</p>
               </>
             ) : (
               <>
-                <p><b>🖐 손 펴고 좌우로</b> 지도의 카메라 구간이 손을 따라가요{ptz ? " (카메라도 실제로 회전)" : ""}</p>
-                <p><b>✊ 주먹</b> 그 자리에 멈춰요</p>
+                <p><b>🤏 집고 좌우로</b> 지도의 카메라 구간이 손을 따라가요{ptz ? " (카메라도 실제로 회전)" : ""}</p>
+                <p><b>🖐 손 펴기</b> 그 자리에 멈춰요</p>
                 <p><b>✌️ 1초 유지</b> 원래 자리로 돌아가요</p>
               </>
             )}
@@ -461,7 +458,7 @@ function drawMini(canvas: HTMLCanvasElement, v: View, palm: Point | null, hold: 
   ctx.strokeStyle = "#ffd166";
   ctx.lineWidth = 2;
   ctx.strokeRect(sx(z.x0), roadY - 8, sx(z.x1) - sx(z.x0), 16);
-
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
   if (!palm) return;
   ctx.fillStyle = "#7ee787";
   ctx.beginPath();

@@ -60,7 +60,7 @@ export function usePanZoom(W: number, H: number, enabled: boolean, locate?: Loca
     handBus.setMacro(null);
   }, []);
 
-  // 🫰 매크로: 대상 쪽으로 미끄러지듯 이동하며 2.5배로 확대하고, 움직이는 대상을 따라간다
+  // 이동 매크로(버튼·숫자 키): 대상 쪽으로 미끄러지듯 이동하며 2.5배로 확대하고, 움직이는 대상을 따라간다
   useEffect(() => {
     if (!enabled) return;
     let raf = 0;

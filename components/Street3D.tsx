@@ -914,6 +914,7 @@ function GestureOrbit({ controls, moving, onReset }: { controls: RefObject<Orbit
     const acts = queue.current.splice(0);
     const { off, sph, right, fwd } = tmp;
     for (const a of acts) {
+      if (a.kind === "next") continue; // 다음 시점은 Street3D가 처리 (여기서 멈추면 시점 이동이 끊긴다)
       if (a.kind === "macro") {
         macro.current = startMacro(a.n, reg, c.target);
         moving.current = false;
@@ -951,7 +952,7 @@ function GestureOrbit({ controls, moving, onReset }: { controls: RefObject<Orbit
       camera.position.copy(c.target).add(off.setFromSpherical(sph));
     }
 
-    // 🫰 매크로: 손으로 끌고 확대하듯 대상 쪽으로 미끄러지듯 다가간 뒤, 움직이는 대상을 계속 따라간다
+    // 이동 매크로(버튼·숫자 키): 손으로 끌고 확대하듯 대상 쪽으로 미끄러지듯 다가간 뒤, 움직이는 대상을 계속 따라간다
     const goal = macro.current;
     if (goal) {
       const p = goal.get();
@@ -1058,6 +1059,7 @@ function RoadView({ eye, resetKey }: { eye: number; resetKey: number }) {
     L.yaw += turn * TURN_SPEED * dt;
 
     for (const a of queue.current.splice(0)) {
+      if (a.kind === "next") continue;
       if (a.kind === "macro") {
         macro.current = startMacro(a.n, reg, here.set(L.x, 0, L.z));
         continue;
@@ -1069,13 +1071,13 @@ function RoadView({ eye, resetKey }: { eye: number; resetKey: number }) {
         L.yaw -= a.dx * ROT * 1.25;
         L.pitch = THREE.MathUtils.clamp(L.pitch + a.dy * ROT * 0.8, -MAX_PITCH, MAX_PITCH);
       } else if (a.kind === "twist") L.yaw += a.angle;
-      // 🤏 바닥을 잡고 몸 쪽으로 당기면 앞으로, 옆으로 밀면 반대쪽으로 걷는다
-      else if (a.kind === "pan") walk(L, a.dy * 25, -a.dx * 25);
-      // 👍·두 손 벌리기 = 앞으로, 👎·모으기 = 뒤로
-      else if (a.kind === "zoom") walk(L, (1 - a.factor) * 6, 0);
+      // 🤏🤏 두 손을 함께 옆으로 옮기면 그쪽으로 옆걸음 (앞뒤는 벌리기·모으기로만: 두 동작이 겹치지 않게)
+      else if (a.kind === "pan") walk(L, 0, a.dx * 25);
+      // 🤏🤏 벌리기 = 앞으로, 모으기 = 뒤로
+      else if (a.kind === "zoom") walk(L, (1 - a.factor) * 8, 0);
     }
 
-    // 🫰 매크로: 대상 9m 앞까지 걸어가 대상 쪽을 바라보고, 움직이면 계속 따라 걷는다
+    // 이동 매크로(버튼·숫자 키): 대상 9m 앞까지 걸어가 대상 쪽을 바라보고, 움직이면 계속 따라 걷는다
     const goal = macro.current;
     if (goal) {
       const p = goal.get();
@@ -1143,6 +1145,26 @@ export default function Street3D({ lamps, walkers, targets, selectedId, onSelect
   const all = useRef(new Map<string, MapTarget>());
   all.current = new Map(targets.map((t) => [t.key, t]));
   useEffect(() => setPreset(view), [view]);
+
+  // ✌️ 1초 유지 = 다음 시점, 숫자 키 1·2·3 = 이동 매크로
+  useEffect(() => {
+    const order = Object.keys(PRESETS) as Preset[];
+    const off = handBus.onStep((st) => {
+      if (st.actions.some((a) => a.kind === "next")) {
+        setPreset((p) => order[(order.indexOf(p) + 1) % order.length]);
+        moving.current = true;
+      }
+    });
+    const key = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).closest("input, textarea, select")) return;
+      if (e.key === "1" || e.key === "2" || e.key === "3") handBus.runMacro(Number(e.key) as 1 | 2 | 3);
+    };
+    window.addEventListener("keydown", key);
+    return () => {
+      off();
+      window.removeEventListener("keydown", key);
+    };
+  }, []);
 
   const cars = walkers.map((w, i) => ({ w, i })).filter(({ w }) => w.kind === "car");
   const people = walkers.map((w, i) => ({ w, i })).filter(({ w }) => w.kind === "person");

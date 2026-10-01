@@ -6,6 +6,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState, type ComponentProps } from "react";
 import GestureHud from "@/components/GestureHud";
+import Icon from "@/components/Icon";
 import StreetMap from "@/components/StreetMap";
 import type { Preset } from "@/components/Street3D";
 import type { MapTarget } from "@/lib/predictive";
@@ -51,6 +52,26 @@ export default function MapView({ view, ...props }: Props) {
     setMode(ok ? (saved ?? "3d") : "2d");
   }, []);
 
+  // 전체 화면: 지도가 화면을 꽉 채우고, 떠 있는 웹캠 창은 그 위에 남는다 (로드뷰 + 웹캠만 보기)
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!full) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.requestFullscreen?.().catch(() => {});
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setFull(false);
+    // 브라우저 전체 화면을 Esc로 빠져나오면 지도도 원래대로
+    const onFs = () => !document.fullscreenElement && setFull(false);
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("fullscreenchange", onFs);
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    };
+  }, [full]);
+
   const choose = (m: Mode) => {
     setMode(m);
     try {
@@ -59,7 +80,10 @@ export default function MapView({ view, ...props }: Props) {
   };
 
   return (
-    <div className="mapview">
+    <div className={`mapview${full ? " mapview-full" : ""}`}>
+      <button className="map-full-btn" onClick={() => setFull((f) => !f)} aria-label={full ? "전체 화면 끝내기" : "지도 전체 화면"} title={full ? "전체 화면 끝내기 (Esc)" : "지도 전체 화면"}>
+        <Icon name={full ? "shrink" : "expand"} size={16} />
+      </button>
       <div className="seg-mini" role="radiogroup" aria-label="지도 보기 방식">
         <button
           role="radio"

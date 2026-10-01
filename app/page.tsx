@@ -8,6 +8,7 @@ import DevicePanel, { type DeviceView } from "@/components/DevicePanel";
 import Icon, { type IconName } from "@/components/Icon";
 import LampDetail, { KIND_LABEL } from "@/components/LampDetail";
 import MapView from "@/components/MapView";
+import MonitorView from "@/components/MonitorView";
 import ReportPanel from "@/components/ReportPanel";
 import SchoolZonePanel from "@/components/SchoolZonePanel";
 import SolarPanel, { type SolarSummary } from "@/components/SolarPanel";
@@ -22,6 +23,7 @@ import type { View } from "@/lib/gesture";
 import { loadModels, resetLamp, scoreLamp, type Models } from "@/lib/ml";
 import { PredictiveLighting, arrival, type MapTarget } from "@/lib/predictive";
 import { ClipRecorder } from "@/lib/clips";
+import { MonitorRecorder, type Snapshot } from "@/lib/monitor";
 import { ControlCenterLink, SITE, toOutbound } from "@/lib/integration";
 import { EVENT_LABEL, SchoolZoneMonitor, policyAt, type Sign } from "@/lib/schoolzone";
 import { VMS_IDS, VmsBus } from "@/lib/vms";
@@ -47,11 +49,12 @@ import {
 } from "@/lib/sim";
 import { Tracker, isMoving } from "@/lib/tracker";
 
-type Tab = "live" | "school" | "facility" | "energy" | "report";
+type Tab = "live" | "monitor" | "school" | "facility" | "energy" | "report";
 
 // 화면마다 제목과 한 줄 설명. 담당자가 처음 봐도 "이 화면이 뭘 하는지" 알 수 있게 쓴다.
 const TABS: { id: Tab; label: string; icon: IconName; title: string; desc: string }[] = [
   { id: "live", label: "관제", icon: "map", title: "실시간 관제", desc: "AI가 도로를 보고 필요한 곳만 밝게 켜요" },
+  { id: "monitor", label: "모니터링", icon: "monitor", title: "모니터링 기록", desc: "웹캠이 보는 현장을 요구사항별로 분석하고 기록해요" },
   { id: "school", label: "스쿨존", icon: "school", title: "어린이보호구역", desc: "과속·충돌 위험·불법 주정차를 찾아 전광판으로 알려요" },
   { id: "facility", label: "시설 점검", icon: "wrench", title: "시설 점검", desc: "고장 날 가로등을 미리 찾아 알려요" },
   { id: "energy", label: "에너지", icon: "bolt", title: "에너지·탄소", desc: "아낀 전기와 줄인 탄소, 내일 태양광 충전 예보" },
@@ -137,11 +140,30 @@ export default function Home() {
   const [deviceError, setDeviceError] = useState("");
   const [brokerUrl, setBrokerUrl] = useState("ws://localhost:9001");
   const [method, setMethod] = useState<Method>("rule");
+  const methodRef = useRef(method);
+  methodRef.current = method;
+  const monitorRef = useRef(new MonitorRecorder());
+  const snapRef = useRef<Snapshot | undefined>(undefined);
+  const camOnRef = useRef(false);
   const zoneRef = useRef(new SchoolZoneMonitor());
   const recorderRef = useRef<ClipRecorder | null>(null);
   const ccRef = useRef(new ControlCenterLink());
   const vmsRef = useRef<VmsBus | null>(null);
   const [tab, setTabState] = useState<Tab>("live");
+  // 데스크톱 왼쪽 메뉴 접기 (아이콘만 남김). 이 기기에 기억한다
+  const [railOpen, setRailOpen] = useState(true);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("damo.rail") === "closed") setRailOpen(false);
+    } catch {}
+  }, []);
+  const toggleRail = () =>
+    setRailOpen((o) => {
+      try {
+        localStorage.setItem("damo.rail", o ? "closed" : "open");
+      } catch {}
+      return !o;
+    });
   const lastSpoken = useRef<Sign["level"]>("idle");
 
   // 주소 끝 #school 처럼 탭을 기억해 링크로 공유할 수 있게 한다
@@ -176,10 +198,11 @@ export default function Home() {
       const clip = e.source === "camera" && !e.device && e.kind !== "crossing";
       if (clip) recorderRef.current?.trigger(e);
       ccRef.current.push(e, clip);
+      monitorRef.current.event(e);
       if (e.kind !== "crossing") linkRef.current?.sendEvent(SITE.id, toOutbound(e, clip));
     });
     // 개발 모드 QA용: 브라우저 콘솔에서 가짜 사건을 넣어 영상 저장·연동을 시험한다
-    if (process.env.NODE_ENV === "development") Object.assign(window, { __damo: { zone: zoneRef.current, recorder: recorderRef.current, cc: ccRef.current, brain: brainRef.current } });
+    if (process.env.NODE_ENV === "development") Object.assign(window, { __damo: { zone: zoneRef.current, recorder: recorderRef.current, cc: ccRef.current, brain: brainRef.current, monitor: monitorRef.current } });
     setReady(true);
     loadModels()
       .then((m) => {
@@ -237,6 +260,38 @@ export default function Home() {
         energyRef.current.actualWh += watt / 60;
         energyRef.current.fullWh += (lampsRef.current.length * RATED_WATT) / 60;
       }
+      // 모니터링 기록: 요구사항별 상태를 한 장으로 (기록기는 1초에 한 장만 남긴다)
+      const z = zoneRef.current;
+      const lamps = lampsRef.current;
+      const flaggedNow = lamps.filter((l) => verdict(l, methodRef.current) !== null);
+      const { actualWh, fullWh } = energyRef.current;
+      const solar = solarRef.current;
+      const pol = policyAt(new Date(), z.settings);
+      const sign = z.signAt(now);
+      const snap: Snapshot = {
+        t: Date.now(),
+        cam: {
+          on: camOnRef.current,
+          person: brain.active.filter((t) => t.kind === "person").length,
+          vehicle: brain.active.filter((t) => t.kind === "vehicle").length,
+          maxKmh: z.maxKmh,
+          seenPerson: brain.byKind.person,
+          seenVehicle: brain.byKind.vehicle,
+        },
+        zone: { level: sign.level, text: sign.text, limit: pol.limit, period: pol.period, counts: { ...z.counts }, warned: z.warned, slowed: z.slowed, rtWarned: z.rtWarned, rtYielded: z.rtYielded },
+        lamps: {
+          total: lamps.length,
+          flagged: flaggedNow.length,
+          bad: flaggedNow.filter((l) => l.health < 60).length,
+          prelit: lamps.filter((l) => l.litBy === "predict").length,
+          avgBright: lamps.reduce((a, l) => a + l.brightness, 0) / Math.max(1, lamps.length),
+          issues: flaggedNow.map((l) => ({ id: l.id, kind: verdict(l, methodRef.current) ?? "unknown" })),
+        },
+        energy: { savingPct: fullWh ? (1 - actualWh / fullWh) * 100 : 0, savedWh: fullWh - actualWh },
+        solar: { totalWh: solar?.totalWh ?? null, risky: solar?.risky.length ?? 0, date: solar?.date ?? null },
+      };
+      snapRef.current = snap;
+      monitorRef.current.tick(snap);
       force((n) => n + 1);
     }, FRAME_MS);
     return () => clearInterval(id);
@@ -459,19 +514,24 @@ export default function Home() {
   );
 
   return (
-    <div className="app">
+    <div className={`app${railOpen ? "" : " rail-closed"}`}>
       <aside className="rail">
-        <Link href="/" className="brand" onClick={() => setTab("live")}>
-          <span className="brand-mark" aria-hidden>
-            <Icon name="lamp" size={20} />
-          </span>
-          <span className="brand-name">
-            DAMO<small>안심 가로등</small>
-          </span>
-        </Link>
+        <div className="rail-top">
+          <Link href="/" className="brand" onClick={() => setTab("live")}>
+            <span className="brand-mark" aria-hidden>
+              <Icon name="lamp" size={20} />
+            </span>
+            <span className="brand-name">
+              DAMO<small>안심 가로등</small>
+            </span>
+          </Link>
+          <button className="rail-toggle" onClick={toggleRail} aria-label={railOpen ? "메뉴 접기" : "메뉴 펼치기"} title={railOpen ? "메뉴 접기" : "메뉴 펼치기"}>
+            <Icon name="chevron" size={18} />
+          </button>
+        </div>
         <nav className="rail-nav" aria-label="메뉴">
           {TABS.map((t) => (
-            <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} aria-current={tab === t.id ? "page" : undefined}>
+            <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} aria-current={tab === t.id ? "page" : undefined} title={t.title}>
               <Icon name={t.icon} />
               <span>{t.title}</span>
               {t.id === "school" && zone.risks() > 0 && <em className="badge">{zone.risks()}</em>}
@@ -479,7 +539,7 @@ export default function Home() {
             </button>
           ))}
         </nav>
-        <Link href="/siting" className="rail-extra">
+        <Link href="/siting" className="rail-extra" title="태양광 설치 검토">
           <Icon name="sun" />
           <span>태양광 설치 검토</span>
         </Link>
@@ -696,6 +756,8 @@ export default function Home() {
             </div>
           )}
 
+          {tab === "monitor" && <MonitorView monitor={monitorRef.current} now={snapRef.current} map={map("road")} />}
+
           {tab === "report" && (
             <div className="stack">
               <ReportPanel buildInput={buildReportInput} />
@@ -734,6 +796,7 @@ export default function Home() {
         inset={insetMap()}
         privacy={zone.settings.privacy}
         recorder={recorderRef.current ?? undefined}
+        onCamStatus={(st) => (camOnRef.current = st === "running")}
         alert={sign.level === "danger" || sign.level === "slow" ? `${sign.text} · ${sign.sub}` : null}
       />
     </div>

@@ -235,7 +235,7 @@ button {
   inset: auto 0 0 0;
   z-index: 40;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   height: calc(var(--tabbar-h) + var(--safe-b));
   padding-bottom: var(--safe-b);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
@@ -328,8 +328,64 @@ button {
 
 @media (min-width: 1024px) {
   .app {
+    --rail-w: 248px;
     display: grid;
-    grid-template-columns: 248px minmax(0, 1fr);
+    grid-template-columns: var(--rail-w) minmax(0, 1fr);
+    transition: grid-template-columns 0.2s ease;
+  }
+  .app.rail-closed {
+    --rail-w: 72px;
+  }
+  .rail-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .rail-toggle {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    flex: none;
+    border: 0;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #aab7cf;
+    cursor: pointer;
+    transform: rotate(180deg);
+  }
+  .rail-toggle:hover {
+    color: #fff;
+  }
+  .rail-closed .rail-toggle {
+    transform: none;
+  }
+  .rail-closed .rail {
+    padding: 22px 10px;
+    align-items: center;
+  }
+  .rail-closed .rail-top {
+    flex-direction: column;
+  }
+  .rail-closed .brand-name,
+  .rail-closed .rail-nav span,
+  .rail-closed .rail-extra span {
+    display: none;
+  }
+  .rail-closed .rail-nav button,
+  .rail-closed .rail-extra {
+    position: relative;
+    justify-content: center;
+    padding: 11px;
+  }
+  .rail-closed .rail-nav .badge {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    min-width: 18px;
+    padding: 0 5px;
+    font-size: 10.5px;
   }
   .rail {
     position: sticky;
@@ -980,9 +1036,9 @@ button {
 
 @media (min-width: 1024px) {
   .dock { width: 340px; }
-  .dock-tl { left: calc(248px + 20px); top: 88px; }
+  .dock-tl { left: calc(var(--rail-w, 248px) + 20px); top: 88px; }
   .dock-tr { right: 20px; top: 88px; }
-  .dock-bl { left: calc(248px + 20px); bottom: 20px; }
+  .dock-bl { left: calc(var(--rail-w, 248px) + 20px); bottom: 20px; }
   .dock-br { right: 20px; bottom: 20px; }
 }
 
@@ -2782,5 +2838,354 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .ghud-ghost {
     animation: none;
+  }
+}
+
+/* ---------- 지도 전체 화면 (로드뷰 + 떠 있는 웹캠 창) ---------- */
+
+.map-full-btn {
+  position: absolute;
+  z-index: 6;
+  top: 10px;
+  right: 108px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(10, 15, 26, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #dbe3f1;
+  cursor: pointer;
+}
+
+.mapview-full {
+  position: fixed;
+  inset: 0;
+  z-index: 45; /* 떠 있는 웹캠 창(50)보다 아래 */
+  background: #0a1222;
+}
+
+.mapview-full .street3d,
+.mapview-full .map {
+  width: 100%;
+  height: 100dvh;
+  max-height: none;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+
+.mapview-full .no3d {
+  position: absolute;
+  z-index: 5;
+  left: 10px;
+  right: 10px;
+  top: 54px;
+}
+
+/* 카메라 창이 모니터링 화면의 웹캠 칸에 붙은 상태 */
+.dock-slot {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  transition: none;
+  box-shadow: none;
+  touch-action: auto;
+}
+
+.dock-slot .cam {
+  flex: 1;
+  min-height: 0;
+}
+
+.dock-slot .cam-stage-wrap {
+  flex: 1;
+  aspect-ratio: auto;
+}
+
+.dock-slot .camera-stage video,
+.dock-slot .camera-stage canvas {
+  object-fit: contain;
+}
+
+.dock-slot .camera-hud,
+.dock-slot .camera-mini {
+  display: block;
+}
+
+.dock-slot .cam-engine {
+  display: inline;
+}
+
+/* ---------- 모니터링 기록 ---------- */
+
+.monitor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.monitor-full {
+  position: fixed;
+  inset: 0;
+  z-index: 44; /* 웹캠 창(50)은 칸에 붙어 이 위에 보인다 */
+  overflow: auto;
+  padding: calc(12px + var(--safe-t)) 16px calc(16px + var(--safe-b));
+  background: var(--bg);
+}
+
+.monitor-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.rec-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 260px;
+}
+
+.rec-dot {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.rec-dot.on {
+  background: #ef4444;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.25);
+  animation: live 1.4s ease-in-out infinite;
+}
+
+.rec-progress {
+  flex: 1 1 160px;
+  height: 8px;
+  accent-color: #ef4444;
+}
+
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.field-inline .input {
+  min-height: 38px;
+  padding: 6px 10px;
+  font-size: 14px;
+}
+
+.monitor-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+@media (min-width: 1024px) {
+  .monitor-stage {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+    align-items: stretch;
+  }
+}
+
+.cam-slot {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  min-height: 300px;
+  aspect-ratio: 4 / 3;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px dashed var(--line);
+  background: #0b0f17;
+  text-align: center;
+}
+
+.monitor-full .monitor-stage {
+  min-height: 62dvh;
+}
+
+.monitor-full .cam-slot {
+  aspect-ratio: auto;
+  min-height: 62dvh;
+}
+
+.monitor-map .street3d,
+.monitor-map .map {
+  max-height: none;
+  height: 100%;
+  min-height: 300px;
+  aspect-ratio: auto;
+}
+
+.monitor-full .monitor-map .street3d {
+  min-height: 62dvh;
+}
+
+.section-title {
+  margin-top: 4px;
+}
+
+.req-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+@media (min-width: 900px) {
+  .req-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.req-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.req-list li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "dot body" "dot basis";
+  gap: 0 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.req-list i {
+  grid-area: dot;
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.req-list .st-ok i { background: var(--ok); }
+.req-list .st-watch i { background: var(--warn); }
+.req-list .st-alert i { background: var(--bad); box-shadow: 0 0 0 4px var(--bad-soft); }
+.req-list .st-alert { background: var(--bad-soft); }
+
+.req-list div {
+  grid-area: body;
+}
+
+.req-list b {
+  font-size: 14px;
+}
+
+.req-list p {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.req-list em {
+  grid-area: basis;
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.sessions button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "name icon" "meta icon";
+  align-items: center;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sessions button.on {
+  border-color: var(--amber);
+}
+
+.sessions b { grid-area: name; }
+.sessions span { grid-area: meta; }
+.sessions svg { grid-area: icon; }
+
+.bars {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.bars li {
+  display: grid;
+  grid-template-columns: 96px 1fr 36px;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.bars i {
+  display: block;
+  height: 10px;
+  min-width: 2px;
+  border-radius: 5px;
+  background: var(--warn);
+}
+
+.bars b {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-report h3 {
+  margin: 14px 0 6px;
+}
+
+/* 모니터링 3D 칸: 웹캠 칸과 같은 높이로 */
+.monitor-map,
+.monitor-map .mapview {
+  height: 100%;
+}
+
+.monitor-map .street3d {
+  min-height: 420px;
+}
+
+@media (max-width: 1023px) {
+  .monitor-map .street3d {
+    min-height: 360px;
+  }
+}
+
+/* 데스크톱: 웹캠 칸은 자기 칸 폭을 넘지 않게 (4:3 비율 고정을 풀고 높이를 3D 칸에 맞춘다) */
+@media (min-width: 1024px) {
+  .monitor-cam .cam-slot {
+    width: 100%;
+    aspect-ratio: auto;
+    min-height: 420px;
   }
 }
