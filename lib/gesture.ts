@@ -10,16 +10,26 @@
 import { prepareTfWasm, quietly, testFrame } from "@/lib/detectors";
 
 export type Point = { x: number; y: number };
-export type Gesture = "fist" | "open" | "victory" | "other";
-export type HandFrame = { lm: Point[]; gesture: Gesture } | null;
+export type Gesture = "fist" | "open" | "victory" | "thumb_up" | "thumb_down" | "point" | "other";
+export type Hand = { lm: Point[]; gesture: Gesture };
+export type HandFrame = Hand | null;
 
+// 한 프레임에서 찾은 손 (최대 2개). 지도 조작은 두 손을, 카메라 구간 조종은 첫 번째 손만 쓴다.
 export type HandEngine = {
   label: string;
-  detect: (video: HTMLVideoElement, now: number) => Promise<HandFrame>;
+  detect: (video: HTMLVideoElement, now: number) => Promise<Hand[]>;
   close: () => void;
 };
 
-const GESTURES: Record<string, Gesture> = { Closed_Fist: "fist", Open_Palm: "open", Victory: "victory" };
+const MAX_HANDS = 2;
+const GESTURES: Record<string, Gesture> = {
+  Closed_Fist: "fist",
+  Open_Palm: "open",
+  Victory: "victory",
+  Thumb_Up: "thumb_up",
+  Thumb_Down: "thumb_down",
+  Pointing_Up: "point",
+};
 
 async function mediapipeEngine(delegate: "GPU" | "CPU"): Promise<HandEngine> {
   const { FilesetResolver, GestureRecognizer } = await import("@mediapipe/tasks-vision");
@@ -29,7 +39,7 @@ async function mediapipeEngine(delegate: "GPU" | "CPU"): Promise<HandEngine> {
     const r = await GestureRecognizer.createFromOptions(vision, {
       baseOptions: { modelAssetPath: "/models/gesture_recognizer.task", delegate },
       runningMode: "VIDEO",
-      numHands: 1,
+      numHands: MAX_HANDS,
       cannedGesturesClassifierOptions: { scoreThreshold: 0.5 },
     });
     try {
@@ -44,10 +54,12 @@ async function mediapipeEngine(delegate: "GPU" | "CPU"): Promise<HandEngine> {
     label: `MediaPipe ${delegate}`,
     detect: async (video, now) => {
       const res = rec.recognizeForVideo(video, now);
-      const lm = res.landmarks[0];
-      if (!lm) return null;
-      const name = res.gestures[0]?.[0]?.categoryName ?? "";
-      return { lm: lm.map((p) => ({ x: 1 - p.x, y: p.y })), gesture: GESTURES[name] ?? "other" };
+      return res.landmarks.map((lm, i) => {
+        const name = res.gestures[i]?.[0]?.categoryName ?? "";
+        const pts = lm.map((p) => ({ x: 1 - p.x, y: p.y }));
+        // 학습된 손동작이 아니면(손등이 보이거나 비스듬할 때 많다) 손가락 관절 위치로 한 번 더 판별한다
+        return { lm: pts, gesture: GESTURES[name] ?? classifyGesture(pts) };
+      });
     },
     close: () => rec.close(),
   };
@@ -59,7 +71,7 @@ async function tfjsEngine(): Promise<HandEngine> {
   const detector = await hpd.createDetector(hpd.SupportedModels.MediaPipeHands, {
     runtime: "tfjs",
     modelType: "lite",
-    maxHands: 1,
+    maxHands: MAX_HANDS,
     detectorModelUrl: "/models/handpose/detector/model.json",
     landmarkModelUrl: "/models/handpose/landmark/model.json",
   });
@@ -77,10 +89,10 @@ async function tfjsEngine(): Promise<HandEngine> {
         frame.height = H;
       }
       fctx.drawImage(video, 0, 0, W, H);
-      const hand = (await detector.estimateHands(frame))[0];
-      if (!hand) return null;
-      const lm = hand.keypoints.map((k) => ({ x: 1 - k.x / W, y: k.y / H }));
-      return { lm, gesture: classifyGesture(lm) };
+      return (await detector.estimateHands(frame)).map((hand) => {
+        const lm = hand.keypoints.map((k) => ({ x: 1 - k.x / W, y: k.y / H }));
+        return { lm, gesture: classifyGesture(lm) };
+      });
     },
     close: () => detector.dispose(),
   };
@@ -111,7 +123,15 @@ export function classifyGesture(lm: Point[]): Gesture {
   const d = (p: Point) => Math.hypot(p.x - wrist.x, p.y - wrist.y);
   const up = FINGERS.map(([tip, pip]) => d(lm[tip]) > d(lm[pip]) * 1.1);
   const n = up.filter(Boolean).length;
-  if (n === 0) return "fist";
+  if (n === 0) {
+    // 네 손가락을 접고 엄지만 위·아래로 세우면 👍·👎 (손 크기의 절반 넘게 엄지 뿌리보다 위/아래)
+    const size = Math.hypot(lm[9].x - wrist.x, lm[9].y - wrist.y);
+    const rise = lm[2].y - lm[4].y;
+    if (rise > size * 0.5) return "thumb_up";
+    if (rise < -size * 0.5) return "thumb_down";
+    return "fist";
+  }
+  if (up[0] && !up[1] && !up[2] && !up[3]) return "point";
   if (n === 4) return "open";
   if (up[0] && up[1] && !up[2] && !up[3]) return "victory";
   return "other";

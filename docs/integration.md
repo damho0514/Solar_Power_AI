@@ -12,9 +12,13 @@
 |---|---|---|
 | `CONTROL_CENTER_WEBHOOK_URL` | 예 | 사건을 받을 주소. https를 권장합니다. 비어 있으면 전송하지 않습니다. |
 | `CONTROL_CENTER_TOKEN` | 아니오 | 있으면 `Authorization: Bearer <토큰>` 헤더를 붙입니다. |
-| `CONTROL_CENTER_SECRET` | 아니오 | 있으면 본문의 HMAC-SHA256 서명을 `X-Damo-Signature: sha256=<hex>`로 붙입니다. |
+| `CONTROL_CENTER_SECRET` | 아니오 | 있으면 `X-Damo-Timestamp: <유닉스 초>`와, `"<timestamp>.<본문>"`의 HMAC-SHA256 서명 `X-Damo-Signature: sha256=<hex>`를 붙입니다. |
 
 주소는 서버 환경변수로만 정합니다. 브라우저가 임의의 주소를 지정할 수는 없습니다.
+
+중계 서버(`/api/events`)는 로그인 없이 열려 있습니다. 서버는 허용한 필드만으로 사건을 다시 만들고, 현장 정보(`site`)를 서버 값으로 덮어써요. 또 IP별 횟수 제한, 다른 사이트에서 보낸 요청 차단, 같은 사건 ID 재전송 차단, 10분 지난 사건 거부를 합니다. 그래도 누구나 형식에 맞는 사건을 만들어 보낼 수는 있으니 다음을 지켜 주세요.
+- 관제센터는 이 사건을 **참고 정보**로 다루고, 출동 같은 조치 전에 영상이나 현장으로 확인하세요.
+- 공개 시연 사이트에는 웹훅 주소를 넣지 마세요.
 
 ### 본문
 
@@ -53,15 +57,48 @@
 
 ### 서명 확인 예시 (Node.js)
 
+받는 쪽은 서명과 함께 시각도 확인해야 가로챈 요청을 나중에 다시 보내는 공격(재전송)을 막을 수 있습니다.
+
 ```js
 import { createHmac, timingSafeEqual } from "node:crypto";
-const expected = "sha256=" + createHmac("sha256", process.env.SECRET).update(rawBody).digest("hex");
-const ok = timingSafeEqual(Buffer.from(expected), Buffer.from(req.headers["x-damo-signature"] ?? ""));
+
+function verify(rawBody, headers, secret) {
+  const ts = Number(headers["x-damo-timestamp"]);
+  if (!Number.isInteger(ts) || Math.abs(Date.now() / 1000 - ts) > 300) return false; // 5분 넘게 차이 나면 거부
+  const expected = Buffer.from("sha256=" + createHmac("sha256", secret).update(`${ts}.${rawBody}`).digest("hex"));
+  const got = Buffer.from(String(headers["x-damo-signature"] ?? ""));
+  return got.length === expected.length && timingSafeEqual(got, expected); // 길이가 다르면 timingSafeEqual이 예외를 낸다
+}
 ```
+
+`rawBody`는 JSON으로 다시 직렬화한 값이 아니라 받은 바이트 그대로여야 합니다. 같은 사건 `id`가 다시 오면 무시하세요.
 
 ## 2. 현장 MQTT
 
-관제 PC에서 `mosquitto -c device/mosquitto.conf`로 브로커를 띄웁니다. 포트 1883은 기기용, 9001은 브라우저용(WebSocket)입니다. 화면에서는 시설 점검 → 실제 장비 연결로 접속합니다.
+노트북 한 대 시연은 `mosquitto -c device/mosquitto.conf`로 브로커를 띄웁니다. 이 설정은 이 컴퓨터 안(127.0.0.1)에서만 접속을 받습니다. 포트 1883은 기기 프로그램용, 9001은 브라우저용(WebSocket)입니다. 화면에서는 시설 점검 → 실제 장비 연결로 접속합니다.
+
+### MQTT 보안 (현장 설치)
+
+다른 기기(라즈베리파이)를 붙이는 현장에서는 `device/mosquitto.secure.conf`를 씁니다. 익명 브로커를 그대로 쓰면 같은 네트워크의 누구나 가로등을 끄거나 전광판 문구를 바꿀 수 있기 때문입니다.
+
+1. **계정:** 계정 이름은 기기 이름과 같게 만듭니다.
+   ```bash
+   mosquitto_passwd -c device/passwd dashboard
+   mosquitto_passwd device/passwd L-05      # 가로등마다
+   mosquitto_passwd device/passwd cam-1     # 카메라마다
+   mosquitto_passwd device/passwd vms-zone  # 전광판마다
+   ```
+2. **인증서:** `device/certs/`에 `ca.crt`, `server.crt`, `server.key`를 둡니다. 기기에는 `ca.crt`만 배포합니다.
+3. **권한:** `device/mosquitto.acl`이 정합니다. 밝기 명령과 전광판 문구는 `dashboard`만 보낼 수 있고, 각 기기는 자기 토픽에만 씁니다.
+4. **기기 실행:** 비밀번호는 명령줄 대신 환경변수로 넘깁니다(명령줄은 `ps`로 보입니다).
+   ```bash
+   MQTT_PASSWORD=... python device/sensor_agent.py --lamp L-05 --broker 192.168.0.10 --port 8883 --tls --cafile ca.crt --username L-05
+   ```
+5. **관제 화면:** 브로커 주소에 계정을 넣습니다. 예: `wss://dashboard:<비밀번호>@192.168.0.10:9443`.
+
+화면과 `/vms` 페이지는 이 컴퓨터, 사설망(10.x, 172.16~31.x, 192.168.x), `.local`, 지금 사이트와 같은 주소의 브로커에만 붙습니다. 링크로 바깥 브로커를 지정해 가짜 문구를 띄우는 것을 막기 위해서예요.
+
+기기 프로그램은 형식이 틀린 메시지(4KB 초과, JSON 아님, 숫자 범위 밖)를 버리고 계속 돕니다. 가로등은 명령이 와도 최소 밝기 10%(`--min-brightness`) 아래로 내려가지 않습니다. 전광판은 문구의 제어 문자를 지웁니다.
 
 | 토픽 | 방향 | 내용 |
 |---|---|---|

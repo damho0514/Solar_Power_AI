@@ -7,6 +7,7 @@
 // 화면을 누르면 전체 화면이 되고, 켜 두는 동안 화면이 꺼지지 않게 한다.
 
 import { useEffect, useState } from "react";
+import { checkBrokerUrl, toSign } from "@/lib/broker";
 import type { Sign } from "@/lib/schoolzone";
 import { VMS_IDS, listenVms, type VmsId } from "@/lib/vms";
 
@@ -29,8 +30,11 @@ export default function VmsPage() {
     const stopLocal = listenVms((m) => m.id === vid && update(m.sign));
 
     // MQTT 전광판 장비 모드: 문구를 구독하고, 켜져 있음을 알린다 (끊기면 브로커가 offline을 남김)
-    const broker = q.get("broker");
+    const asked = q.get("broker");
+    const checked = asked ? checkBrokerUrl(asked) : null;
+    const broker = checked?.ok ? checked.url : null;
     let end: (() => void) | null = null;
+    if (checked && !checked.ok) setVia(`브로커 연결 안 함: ${checked.reason}`);
     if (broker) {
       setVia(`MQTT ${broker}`);
       void import("mqtt").then(({ default: mqtt }) => {
@@ -43,7 +47,8 @@ export default function VmsPage() {
         });
         c.on("message", (_t, p) => {
           try {
-            update(JSON.parse(p.toString()) as Sign);
+            const s = toSign(JSON.parse(p.toString()));
+            if (s) update(s);
           } catch {}
         });
         end = () => {

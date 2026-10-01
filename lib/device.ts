@@ -2,6 +2,7 @@
 // 메시지 형식은 device/sensor_agent.py, device/edge_camera.py, device/vms_agent.py 상단 설명과 docs/integration.md에 있다.
 
 import type { MqttClient } from "mqtt";
+import { checkBrokerUrl } from "./broker";
 import type { OutboundEvent } from "./integration";
 import type { Sign } from "./schoolzone";
 import type { Reading } from "./sim";
@@ -29,8 +30,10 @@ export type DeviceLink = {
 };
 
 export async function connectDevices(url: string, h: DeviceHandlers): Promise<DeviceLink> {
+  const checked = checkBrokerUrl(url);
+  if (!checked.ok) throw new Error(checked.reason);
   const mqtt = (await import("mqtt")).default;
-  const client: MqttClient = mqtt.connect(url, { reconnectPeriod: 3000, connectTimeout: 5000, clientId: `dashboard-${Math.random().toString(16).slice(2, 8)}` });
+  const client: MqttClient = mqtt.connect(checked.url, { reconnectPeriod: 3000, connectTimeout: 5000, clientId: `dashboard-${Math.random().toString(16).slice(2, 8)}` });
 
   client.on("connect", () => {
     h.onConnection("connected");

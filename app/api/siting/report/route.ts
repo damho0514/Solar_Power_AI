@@ -2,6 +2,7 @@
 // 판정 결과는 규칙으로 이미 정해져 있고, LLM은 조례 조문을 읽고 예외·추가 조건을 풀어 설명하는 역할이다.
 
 import { streamChat } from "@/lib/llm";
+import { DATA_RULE, fail, guardJson } from "@/lib/server/guard";
 import { LEVEL_LABEL, TARGET_LABEL, type Distances, type Finding, type Land, type Level, type Setback } from "@/lib/siting";
 import type { Article } from "@/lib/ordinance";
 
@@ -57,7 +58,9 @@ function buildPrompt(d: Input) {
 - 조례 조문에 없는 거리·수치를 지어내지 마세요. 인용할 때는 〈조례명 · 조 제목〉을 밝히세요.
 - 종합 판정은 규칙 판정의 결론 "${LEVEL_LABEL[d.level]}"을 따르되, 조문에 예외 조항(지형 차폐, 주민 동의, 공공사업, 지붕형 등)이 있으면 설명하세요.
 - 확정 판단이 아니라 사전 검토라는 점을 한 번만 밝히세요.
+${DATA_RULE}
 
+<자료>
 [토지]
 ${land}
 
@@ -69,6 +72,7 @@ ${d.permits.map((p, i) => `${i + 1}. ${p}`).join("\n")}
 
 [조례 조문]
 ${excerpts.join("\n\n") || "관련 조례 조문을 찾지 못함"}
+</자료>
 
 [형식]
 ## 종합 의견
@@ -81,7 +85,19 @@ ${excerpts.join("\n\n") || "관련 조례 조문을 찾지 못함"}
 목록으로 세 개 이내.`;
 }
 
+// 조문 발췌(ARTICLE_BUDGET)가 가장 크다. 조문 한 개 본문은 길 수 있어 문자열 한도를 넉넉히 둔다
+const LIMITS = { maxStr: 4000, maxArr: 40, maxDepth: 6, maxKeys: 40 };
+
 export async function POST(req: Request) {
-  const data = (await req.json()) as Input;
-  return streamChat(buildPrompt(data), { num_ctx: 12288 });
+  const g = await guardJson(req, { name: "siting-report", limit: 6, maxBytes: 160_000, clamp: LIMITS });
+  if (!g.ok) return g.res;
+  const data = g.body as Input;
+  if (!data || typeof data.level !== "string" || !Object.hasOwn(LEVEL_LABEL, data.level)) return fail(400, "검토 자료 형식이 맞지 않아요");
+  let prompt: string;
+  try {
+    prompt = buildPrompt(data);
+  } catch (e) {
+    return fail(400, "검토 자료 형식이 맞지 않아요", e);
+  }
+  return streamChat(prompt, { num_ctx: 12288 });
 }

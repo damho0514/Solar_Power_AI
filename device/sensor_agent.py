@@ -26,7 +26,7 @@ import json
 import random
 import time
 
-import paho.mqtt.client as mqtt
+from mqtt_common import add_mqtt_args, clean_text, finite_in, make_client, parse_object, safe_handler
 
 
 class RealHardware:
@@ -70,11 +70,13 @@ class Simulated:
         return {"voltage": voltage, "current": (100 * brightness / 220 + 0.02) * factor + noise(0.008), "temp": self.temp}
 
 
+def clean_reason(v) -> str:
+    return clean_text(v, 20)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lamp", required=True, help="관제 화면의 가로등 번호, 예: L-05")
-    ap.add_argument("--broker", default="localhost")
-    ap.add_argument("--port", type=int, default=1883)
     ap.add_argument("--interval", type=float, default=60, help="측정 주기(초)")
     ap.add_argument("--simulate", action="store_true", help="센서 없이 값을 흉내 냄")
     ap.add_argument("--fault", choices=["voltage", "overheat", "driver"], help="--simulate에서 흉내 낼 고장")
@@ -82,6 +84,9 @@ def main():
     ap.add_argument("--count", type=int, default=0, help="이 횟수만큼 보내고 끝냄 (0 = 계속)")
     ap.add_argument("--failsafe-after", type=float, default=300, help="이 시간(초) 동안 명령이 없으면 안전 밝기로")
     ap.add_argument("--failsafe-brightness", type=float, default=1.0)
+    # 명령이 위조되더라도 밤에 완전히 꺼지지 않게 하는 하한 (관제 화면의 최저 대기 밝기는 20%)
+    ap.add_argument("--min-brightness", type=float, default=0.1)
+    add_mqtt_args(ap)
     args = ap.parse_args()
 
     hw = Simulated(args.fault, args.fault_after) if args.simulate else RealHardware()
@@ -94,16 +99,19 @@ def main():
         print(f"[{args.lamp}] 브로커 연결됨: {args.broker}:{args.port}", flush=True)
 
     def on_message(client, userdata, msg):
-        cmd = json.loads(msg.payload)
-        b = max(0.0, min(1.0, float(cmd["brightness"])))
+        cmd = parse_object(msg.payload)
+        b = finite_in(cmd.get("brightness"), 0.0, 1.0) if cmd else None
+        if b is None:
+            print(f"[{args.lamp}] 형식이 틀린 밝기 명령을 버림", flush=True)
+            return
+        b = max(args.min_brightness, b)
         if abs(b - state["brightness"]) > 0.01:
-            print(f"[{args.lamp}] 밝기 명령 {state['brightness']:.0%} → {b:.0%} ({cmd.get('reason', '')})", flush=True)
+            print(f"[{args.lamp}] 밝기 명령 {state['brightness']:.0%} → {b:.0%} ({clean_reason(cmd.get('reason'))})", flush=True)
         state.update(brightness=b, last_command=time.time(), failsafe=False)
         hw.set_brightness(b)
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"sensor-{args.lamp}")
-    client.will_set(f"{base}/status", "offline", qos=1, retain=True)
-    client.on_connect, client.on_message = on_connect, on_message
+    client = make_client(args, f"sensor-{args.lamp}", f"{base}/status")
+    client.on_connect, client.on_message = on_connect, safe_handler(args.lamp, on_message)
     client.connect(args.broker, args.port, keepalive=30)
     client.loop_start()
 

@@ -1,6 +1,8 @@
 "use client";
 
 import type { MapTarget } from "@/lib/predictive";
+import { usePanZoom, type Locate } from "@/lib/usePanZoom";
+import { useRef } from "react";
 import { RT, ZONE, inZone, simSpeedKmh, type Sign } from "@/lib/schoolzone";
 import { MAP_H, MAP_W, ROAD_H_Y, ROAD_V_X, camZone, walkerXY, type Lamp, type Walker } from "@/lib/sim";
 
@@ -24,8 +26,38 @@ export default function StreetMap({ lamps, walkers, selectedId, onSelect, target
     const a = alert(l);
     return a === "bad" ? "var(--bad)" : a === "warn" ? "var(--warn)" : "var(--ok)";
   };
+  // 작은 미리보기를 뺀 지도는 손동작·휠·끌기로 확대하고 옮긴다
+  // 매크로 대상 찾기: 시뮬레이션의 가로 도로 보행자 = 어린이, 세로 도로 = 어른 보행자. 보행자는 웹캠이 본 사람을 먼저
+  const live = useRef({ walkers, targets });
+  live.current = { walkers, targets };
+  const locate: Locate = (target, from) => {
+    if (target === "cam") return () => ({ x: (camZone.x0 + camZone.x1) / 2, y: ROAD_H_Y });
+    const near = <T,>(xs: T[], at: (t: T) => { x: number; y: number }) =>
+      xs.reduce<T | null>((best, t) => (!best || dist(at(t), from) < dist(at(best), from) ? t : best), null);
+    const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+    if (target === "person") {
+      const ai = near(live.current.targets.filter((t) => t.kind === "person" && !t.ghost), (t) => ({ x: t.x, y: ROAD_H_Y + 20 }));
+      if (ai) return () => {
+        const t = live.current.targets.find((x) => x.key === ai.key);
+        return t ? { x: t.x, y: ROAD_H_Y + 20 } : null;
+      };
+    }
+    const want = target === "child" ? "h" : "v";
+    const w = near(live.current.walkers.filter((x) => x.kind === "person" && x.road === want), walkerXY);
+    return w ? () => walkerXY(w) : null; // 같은 객체를 시뮬레이터가 계속 움직인다
+  };
+  const pz = usePanZoom(MAP_W, MAP_H, !compact, locate);
+  const { box } = pz;
+  const k = box.w / MAP_W; // 확대해도 버튼 크기는 그대로
   return (
-    <svg className={`map${compact ? " compact" : ""}`} viewBox={`0 0 ${MAP_W} ${MAP_H}`} role="img" aria-label="가로등 관제 지도">
+    <svg
+      ref={pz.svgRef}
+      className={`map${compact ? " compact" : ""}${pz.zoomed ? " zoomed" : ""}`}
+      viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`}
+      role="img"
+      aria-label="가로등 관제 지도"
+      {...pz.handlers}
+    >
       <defs>
         <radialGradient id="glow">
           <stop offset="0%" stopColor="#ffe8a3" stopOpacity="0.9" />
@@ -168,6 +200,15 @@ export default function StreetMap({ lamps, walkers, selectedId, onSelect, target
           )}
         </g>
       ))}
+
+      {pz.zoomed && (
+        <g className="map-reset" transform={`translate(${box.x + 10 * k}, ${box.y + box.h - 36 * k}) scale(${k})`} onClick={pz.reset} role="button" aria-label="전체 보기">
+          <rect width={86} height={26} rx={13} fill="#1f2a3d" stroke="var(--amber)" strokeWidth={1.5} />
+          <text x={43} y={17} textAnchor="middle" fontSize={12} fill="var(--text)">
+            전체 보기 ×{pz.scale.toFixed(1)}
+          </text>
+        </g>
+      )}
     </svg>
   );
 }

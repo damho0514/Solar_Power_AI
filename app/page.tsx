@@ -167,6 +167,8 @@ export default function Home() {
     walkersRef.current = [...createWalkers(), { road: "v", pos: 420, speed: -0.5, kind: "person" }];
     brainRef.current = new PredictiveLighting(performance.now());
     recorderRef.current = new ClipRecorder();
+    // 보관 기간이 지난 사건 영상은 스쿨존 탭을 열지 않아도 앱을 켤 때 지운다
+    void recorderRef.current.purge().catch(() => {});
     vmsRef.current = new VmsBus();
     ccRef.current.start();
     // 사건이 생기면: 이 화면 카메라의 사건은 영상 저장 → 관제센터 전송 → 현장 MQTT로도 알림

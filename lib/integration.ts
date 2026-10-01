@@ -84,7 +84,7 @@ export class ControlCenterLink {
 
   async flush() {
     if (!this.queue.length) return;
-    const batch = this.queue.splice(0, 50);
+    const batch = this.queue.splice(0, 20); // 서버(app/api/events)가 한 번에 받는 최대 개수
     let retry = true;
     try {
       const res = await fetch("/api/events", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ events: batch }) });
