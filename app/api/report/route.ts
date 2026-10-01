@@ -19,9 +19,11 @@ type ReportInput = {
   school?: {
     period: string;
     limit: number;
-    counts: { speeding: number; conflict: number; parking: number; crossing: number };
+    counts: { speeding: number; conflict: number; parking: number; rightturn?: number; crossing: number };
     slowRate: number | null;
     warned: number;
+    rtRate?: number | null;
+    rtWarned?: number;
     recent: string[];
   };
   solar: { date: string; source: string; totalWh: number; risky: { id: string; endPct: number }[] } | null;
@@ -70,8 +72,11 @@ function buildPrompt(d: ReportInput) {
   const school = z
     ? [
         `- 운영 시간대: ${z.period} · 제한속도 ${z.limit}km/h`,
-        `- 오늘 기록: 과속 ${z.counts.speeding}건, 보행자 충돌 위험 ${z.counts.conflict}건, 불법 주정차 ${z.counts.parking}건, 보행자 횡단 ${z.counts.crossing}건`,
+        `- 오늘 기록: 과속 ${z.counts.speeding}건, 보행자 충돌 위험 ${z.counts.conflict}건, 불법 주정차 ${z.counts.parking}건, 우회전 위험 ${z.counts.rightturn ?? 0}건, 보행자 횡단 ${z.counts.crossing}건`,
         z.slowRate === null ? "- 경고 후 감속: 과속 차량 없음" : `- 경고 후 감속: 과속 차량 ${z.warned}대 중 ${Math.round(z.slowRate * 100)}%가 전광판 경고 뒤 제한속도 아래로 감속`,
+        z.rtRate === null || z.rtRate === undefined
+          ? null
+          : `- 우회전 일시정지: 보행자가 있는데 우회전하려던 차량 ${z.rtWarned}대 중 ${Math.round(z.rtRate * 100)}%가 횡단보도 앞에서 정지`,
         z.recent.length ? `- 최근 사건:\n${z.recent.map((r) => `  · ${r}`).join("\n")}` : null,
       ]
         .filter(Boolean)
@@ -103,7 +108,7 @@ ${lamps}
 ## 우선 점검 대상
 건강도가 낮은 순서로, 가로등 번호, 의심 원인, 권장 조치(현장 점검/부품 교체/모니터링 유지)를 표로.
 ## 어린이보호구역 안전
-과속·충돌 위험·불법 주정차 건수와 경고 후 감속률, 필요한 조치(단속 요청, 시간대 집중 관리)를 두세 문장으로.
+과속·충돌 위험·불법 주정차·우회전 위험 건수와 경고 후 감속률·우회전 일시정지율, 필요한 조치(단속 요청, 시간대 집중 관리)를 두세 문장으로.
 ## 통행 및 조명 제어
 카메라 통행량, 이동 예측, 대기 밝기 정책을 두세 문장으로.
 ## 태양광·배터리

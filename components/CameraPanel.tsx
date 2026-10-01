@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Icon from "@/components/Icon";
 import { LABELS, createEngine, type Engine } from "@/lib/detectors";
 import { GestureController, createHandEngine, type HandEngine, type Mode, type Point, type View } from "@/lib/gesture";
+import type { ClipRecorder } from "@/lib/clips";
+import { mask } from "@/lib/privacy";
 import { openCamera, type Facing, type Ptz } from "@/lib/ptz";
 import { CAM_HOME_POS, MAP_W, zoneFor } from "@/lib/sim";
 import { Tracker, isMoving, predict, type Detection, type Track } from "@/lib/tracker";
@@ -21,6 +23,7 @@ type Props = {
   tools?: ReactNode; // 창 크기 버튼 등 카메라 창이 붙이는 버튼
   privacy?: boolean; // 얼굴·번호판 부분 모자이크
   compact?: boolean; // 작은 창: 카메라 전환·끄기 버튼은 숨기고 창 버튼만
+  recorder?: ClipRecorder; // 사건 영상 저장
 };
 
 // 처음 자리: 지도의 원래 카메라 구간
@@ -39,7 +42,7 @@ const isDesktop = () => typeof window !== "undefined" && window.matchMedia("(poi
 
 const sameView = (a: View, b: View) => a.x === b.x && a.y === b.y && a.zoom === b.zoom;
 
-export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy = true, compact }: Props) {
+export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy = true, compact, recorder }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -73,6 +76,8 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
   onViewRef.current = onView;
   const privacyRef = useRef(privacy);
   privacyRef.current = privacy;
+  const recorderRef = useRef(recorder);
+  recorderRef.current = recorder;
   const mirror = facing === "user"; // 앞면 카메라만 거울처럼 보여 준다
 
   useEffect(() => onStatus?.(status), [status, onStatus]);
@@ -192,6 +197,7 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
         const frame = trackerRef.current.update(dets, now);
         onFrameRef.current({ ...frame, now });
         draw(canvas, W, H, frame.active, privacyRef.current ? { video, flipX } : null);
+        recorderRef.current?.capture({ video, flipX }, frame.active, now);
 
         // 인식은 항상 전체 프레임에서 하므로 디지털 확대 중에도 화면 밖의 손을 알아본다
         const hand = handRef.current;
@@ -297,7 +303,12 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
         <span className={`cam-live${status === "running" ? " on" : ""}`}>
           {status === "running" ? (compact ? "AI 분석 중" : `AI 분석 중 · ${fps}fps`) : status === "loading" ? "연결 중" : "꺼짐"}
         </span>
-        {status === "running" && engineInfo.label && <span className="cam-engine">{engineInfo.label}</span>}
+        {status === "running" && recorder?.recording && <span className="cam-rec">녹화</span>}
+        {status === "running" && engineInfo.label && (
+          <span className="cam-engine" title={engineInfo.skipped.length ? "GPU를 쓸 수 없어 CPU로 실행 중. 크롬 설정에서 그래픽 가속을 켜면 빨라져요." : undefined}>
+            {engineInfo.label}
+          </span>
+        )}
         <span className="cam-spacer" />
         {gestures && !compact && (
           <button className="icon-btn" onClick={() => setHelp((h) => !h)} aria-label="손동작 도움말" title="손동작 도움말">
@@ -318,32 +329,6 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
       </div>
     </div>
   );
-}
-
-// 개인정보 가림: 사람은 머리 부분(박스 위쪽 30%), 차는 번호판 높이(아래쪽 30%)를 굵은 모자이크로 덮는다.
-// 원본 영상은 그대로 두고 화면 위에만 겹쳐 그리므로, 영상을 저장·전송하는 장비에서는 같은 처리를 기기에서 해야 한다.
-let mosaic: HTMLCanvasElement | null = null; // 서버 렌더링 때는 document가 없으므로 처음 쓸 때 만든다
-function mask(ctx: CanvasRenderingContext2D, W: number, H: number, t: Track, src: { video: HTMLVideoElement; flipX: boolean }) {
-  const b = t.box;
-  const part = t.kind === "person" ? { y: b.y, h: b.h * 0.3 } : { y: b.y + b.h * 0.7, h: b.h * 0.3 };
-  const dx = b.x * W, dy = part.y * H, dw = b.w * W, dh = part.h * H;
-  if (dw < 2 || dh < 2) return;
-  const sx = src.flipX ? W - dx - dw : dx; // 거울 화면이면 원본에서는 좌우 반대 위치
-  const cols = Math.max(2, Math.round(dw / 14));
-  const rows = Math.max(2, Math.round(dh / 14));
-  mosaic ??= document.createElement("canvas");
-  mosaic.width = cols;
-  mosaic.height = rows;
-  const m = mosaic.getContext("2d")!;
-  m.drawImage(src.video, sx, dy, dw, dh, 0, 0, cols, rows);
-  ctx.save();
-  ctx.imageSmoothingEnabled = false;
-  if (src.flipX) {
-    ctx.translate(dx + dw, dy);
-    ctx.scale(-1, 1);
-    ctx.drawImage(mosaic, 0, 0, dw, dh);
-  } else ctx.drawImage(mosaic, dx, dy, dw, dh);
-  ctx.restore();
 }
 
 function draw(canvas: HTMLCanvasElement, W: number, H: number, tracks: Track[], privacy: { video: HTMLVideoElement; flipX: boolean } | null) {

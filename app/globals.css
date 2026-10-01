@@ -1455,7 +1455,17 @@ button {
 
 @media (min-width: 768px) {
   .stats {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+.stats .stat:last-child:nth-child(odd) {
+  grid-column: 1 / -1; /* 휴대폰 2열에서 마지막 하나가 남으면 한 줄을 다 쓴다 */
+}
+
+@media (min-width: 768px) {
+  .stats .stat:last-child:nth-child(odd) {
+    grid-column: auto;
   }
 }
 
@@ -2149,4 +2159,229 @@ button {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* ---------- /vms 전광판 화면 (태블릿·모니터용) ---------- */
+
+.vms-screen {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 4vmin;
+  background: #000;
+  cursor: pointer;
+}
+
+.vms-face {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2vmin;
+  width: 100%;
+  max-width: 1600px;
+  min-height: 70dvh;
+  padding: 4vmin;
+  border: 1.2vmin solid var(--zone);
+  border-radius: 3vmin;
+  background: #050505 repeating-linear-gradient(0deg, transparent 0 4px, rgba(255, 255, 255, 0.035) 4px 5px);
+  text-align: center;
+}
+
+.vms-screen.vms-danger .vms-face {
+  border-color: #ef4444;
+}
+
+.vms-screen-tag {
+  font-size: 3.6vmin;
+  font-weight: 800;
+  color: var(--zone);
+}
+
+.vms-screen .vms-text {
+  font-size: 16vmin;
+  line-height: 1.05;
+}
+
+.vms-screen .vms-sub {
+  font-size: 5.5vmin;
+}
+
+.vms-foot {
+  font-size: 13px;
+  color: #6b7890;
+}
+
+.cam-rec {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  animation: flash 1s steps(2) infinite;
+}
+
+/* ---------- 사건 영상·연동 ---------- */
+
+.signs {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
+.signs .vms:not(.large) .vms-text {
+  font-size: 22px;
+}
+
+.signs .vms:not(.large) .vms-sub {
+  font-size: 12px;
+}
+
+@media (max-width: 480px) {
+  .signs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.effect + .effect {
+  margin-top: 8px;
+}
+
+.kv-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 4px 0 12px;
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+
+.kv-row b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.row-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.clips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.clips button {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+  aspect-ratio: 4 / 3;
+  cursor: pointer;
+}
+
+.clips img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.clip-kind,
+.clip-time {
+  position: absolute;
+  left: 6px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.clip-kind {
+  top: 6px;
+  background: rgba(220, 38, 38, 0.9);
+}
+
+.clip-time {
+  bottom: 6px;
+  font-weight: 500;
+}
+
+.clip-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 12px;
+}
+
+.clip-foot label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+
+.clip-foot .input {
+  min-height: 36px;
+  padding: 4px 8px;
+}
+
+.clip-foot p {
+  flex: 1 1 240px;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(5, 8, 15, 0.7);
+}
+
+.modal-body {
+  width: min(560px, 100%);
+  max-height: 90dvh;
+  overflow: auto;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.player {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+}
+
+.player img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }

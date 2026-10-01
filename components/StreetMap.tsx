@@ -1,7 +1,7 @@
 "use client";
 
 import type { MapTarget } from "@/lib/predictive";
-import { ZONE, inZone, simSpeedKmh, type Sign } from "@/lib/schoolzone";
+import { RT, ZONE, inZone, simSpeedKmh, type Sign } from "@/lib/schoolzone";
 import { MAP_H, MAP_W, ROAD_H_Y, ROAD_V_X, camZone, walkerXY, type Lamp, type Walker } from "@/lib/sim";
 
 type Props = {
@@ -12,13 +12,14 @@ type Props = {
   targets: MapTarget[];
   alert: (l: Lamp) => "bad" | "warn" | null;
   sign?: Sign; // 스쿨존 전광판 현재 문구
+  rtSign?: Sign; // 교차로 우회전 알리미 문구
   limit?: number; // 스쿨존 제한속도
   compact?: boolean; // 작은 미리보기 (글자·범례 생략)
 };
 
 const SIGN_COLOR: Record<Sign["level"], string> = { idle: "#1f2a3d", child: "#b7791f", slow: "#c2410c", danger: "#b91c1c" };
 
-export default function StreetMap({ lamps, walkers, selectedId, onSelect, targets, alert, sign, limit = 30, compact }: Props) {
+export default function StreetMap({ lamps, walkers, selectedId, onSelect, targets, alert, sign, rtSign, limit = 30, compact }: Props) {
   const statusColor = (l: Lamp) => {
     const a = alert(l);
     return a === "bad" ? "var(--bad)" : a === "warn" ? "var(--warn)" : "var(--ok)";
@@ -65,6 +66,26 @@ export default function StreetMap({ lamps, walkers, selectedId, onSelect, target
             {!compact && (
               <text x={64} y={33} textAnchor="middle" className="map-sign-sub" fill="#fde68a">
                 {sign.sub}
+              </text>
+            )}
+          </g>
+        </g>
+      )}
+
+      {/* 교차로 남쪽 횡단보도와 우회전 알리미 */}
+      {Array.from({ length: 6 }, (_, i) => (
+        <rect key={`rt${i}`} x={RT.x - 20 + i * 7} y={RT.y - 13} width={4} height={26} fill="#f5f7fb" opacity={0.85} />
+      ))}
+      {rtSign && (
+        <g transform={`translate(${RT.x + 30}, ${RT.y + 4})`}>
+          <g className="sign-scale">
+            <rect width={compact ? 80 : 112} height={compact ? 28 : 38} rx={5} fill={SIGN_COLOR[rtSign.level]} stroke="var(--zone)" strokeWidth={1.5} />
+            <text x={compact ? 40 : 56} y={compact ? 19 : 17} textAnchor="middle" className="map-sign" fill="#fff">
+              {rtSign.text}
+            </text>
+            {!compact && (
+              <text x={56} y={31} textAnchor="middle" className="map-sign-sub" fill="#fde68a">
+                {rtSign.sub}
               </text>
             )}
           </g>

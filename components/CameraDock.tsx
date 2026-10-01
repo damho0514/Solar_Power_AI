@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import CameraPanel, { type CameraFrame, type CameraStatus } from "@/components/CameraPanel";
 import Icon from "@/components/Icon";
+import type { ClipRecorder } from "@/lib/clips";
 import type { View } from "@/lib/gesture";
 
 type Mode = "pip" | "full" | "min";
@@ -21,6 +22,7 @@ type Props = {
   onShowMap: () => void;
   alert?: string | null; // 스쿨존 경고처럼 창 위에 띄울 한 줄
   privacy?: boolean;
+  recorder?: ClipRecorder;
 };
 
 const MARGIN = 12;
@@ -34,7 +36,7 @@ function load(): { mode: Mode; corner: Corner } {
   return { mode: "pip", corner: "br" };
 }
 
-export default function CameraDock({ onFrame, onView, inset, onShowMap, alert, privacy }: Props) {
+export default function CameraDock({ onFrame, onView, inset, onShowMap, alert, privacy, recorder }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<Mode>("pip");
   const [corner, setCorner] = useState<Corner>("br");
@@ -131,6 +133,7 @@ export default function CameraDock({ onFrame, onView, inset, onShowMap, alert, p
           onStatus={onStatus}
           privacy={privacy}
           compact={mode !== "full"}
+          recorder={recorder}
           tools={
             <>
               {mode === "full" ? (
