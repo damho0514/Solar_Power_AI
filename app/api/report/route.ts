@@ -16,6 +16,14 @@ type ReportInput = {
     binSeconds: number;
     idleReason: string;
   };
+  school?: {
+    period: string;
+    limit: number;
+    counts: { speeding: number; conflict: number; parking: number; crossing: number };
+    slowRate: number | null;
+    warned: number;
+    recent: string[];
+  };
   solar: { date: string; source: string; totalWh: number; risky: { id: string; endPct: number }[] } | null;
   method: string;
   flagged: {
@@ -58,6 +66,18 @@ function buildPrompt(d: ReportInput) {
         : "- 내일 밤 뒤 배터리 20% 미만 예상 가로등 없음")
     : "- 태양광 예보를 받지 못함";
 
+  const z = d.school;
+  const school = z
+    ? [
+        `- 운영 시간대: ${z.period} · 제한속도 ${z.limit}km/h`,
+        `- 오늘 기록: 과속 ${z.counts.speeding}건, 보행자 충돌 위험 ${z.counts.conflict}건, 불법 주정차 ${z.counts.parking}건, 보행자 횡단 ${z.counts.crossing}건`,
+        z.slowRate === null ? "- 경고 후 감속: 과속 차량 없음" : `- 경고 후 감속: 과속 차량 ${z.warned}대 중 ${Math.round(z.slowRate * 100)}%가 전광판 경고 뒤 제한속도 아래로 감속`,
+        z.recent.length ? `- 최근 사건:\n${z.recent.map((r) => `  · ${r}`).join("\n")}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "- 데이터 없음";
+
   return `당신은 지자체 스마트 가로등 관제센터의 유지보수 담당자입니다.
 아래 데이터만 근거로 오늘의 점검 보고서를 한국어로 작성하세요. 데이터에 없는 사실은 지어내지 마세요.
 
@@ -67,6 +87,9 @@ function buildPrompt(d: ReportInput) {
 
 [카메라 AI (실측)]
 ${camera}
+
+[어린이보호구역 (카메라 실측 + 시뮬레이션)]
+${school}
 
 [태양광 발전 예측 (ML)]
 ${solar}
@@ -79,6 +102,8 @@ ${lamps}
 두세 문장.
 ## 우선 점검 대상
 건강도가 낮은 순서로, 가로등 번호, 의심 원인, 권장 조치(현장 점검/부품 교체/모니터링 유지)를 표로.
+## 어린이보호구역 안전
+과속·충돌 위험·불법 주정차 건수와 경고 후 감속률, 필요한 조치(단속 요청, 시간대 집중 관리)를 두세 문장으로.
 ## 통행 및 조명 제어
 카메라 통행량, 이동 예측, 대기 밝기 정책을 두세 문장으로.
 ## 태양광·배터리

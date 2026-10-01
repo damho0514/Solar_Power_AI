@@ -65,17 +65,17 @@ export default function SolarPanel({ lamps, onSelect, summaryRef }: Props) {
     .join(" · ");
 
   return (
-    <section className="panel">
-      <header className="panel-head">
-        <h2>⑥ 태양광 발전량 예측 (내일)</h2>
-        <span className="muted">{fc ? `${fc.date} · ${fc.source}` : "예보 불러오는 중…"}</span>
+    <section className="card">
+      <header className="card-head">
+        <h2>내일 태양광 충전 예보</h2>
+        <span className="muted">{fc ? `${fc.date} · ${fc.source}` : "날씨 예보를 불러오는 중…"}</span>
       </header>
-      {error && <p className="report-body error">예보를 받지 못했습니다: {error}</p>}
+      {error && <p className="report-body error">날씨 예보를 받지 못했어요: {error}</p>}
       {fc && (
-        <div className="row">
+        <div className="grid-2">
           <div>
             <p className="solar-total">
-              패널 1장({fc.panelWp}W) 기준 <b>{Math.round(fc.totalWh)}Wh</b>
+              패널 1장({fc.panelWp}W)이 내일 충전할 양 <b>{Math.round(fc.totalWh)}Wh</b>
             </p>
             <div className="chart">
               <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="내일 시간별 예상 발전량">
@@ -116,19 +116,19 @@ export default function SolarPanel({ lamps, onSelect, summaryRef }: Props) {
           </div>
           <div>
             <p className={`solar-total ${risky.length ? "warn" : "ok"}`}>
-              배터리 위험 <b>{risky.length}개</b> / {lamps.length}개
+              배터리 부족 예상 <b>{risky.length}개</b> / {lamps.length}개
             </p>
             <p className="muted">
-              오늘 밤 사용 → 내일 충전 → 내일 밤 사용 뒤 {RISK_LEVEL * 100}% 미만이면 위험 · 가정: 배터리 {BATTERY_WH / 1000}kWh, 밤{" "}
+              오늘 밤 쓰고, 내일 충전하고, 내일 밤 쓴 뒤 {RISK_LEVEL * 100}% 아래로 떨어지면 부족으로 봐요 · 가정: 배터리 {BATTERY_WH / 1000}kWh, 밤{" "}
               {NIGHT_HOURS}시간, 평균 밝기 {NIGHT_DUTY * 100}% (밤 사용 {RATED_WATT * NIGHT_DUTY * NIGHT_HOURS}Wh)
             </p>
-            <table className="tracks">
+            <table className="table">
               <thead>
                 <tr>
                   <th>가로등</th>
                   <th>지금</th>
                   <th>내일 충전</th>
-                  <th>내일 밤 뒤</th>
+                  <th>내일 밤 뒤 남는 양</th>
                 </tr>
               </thead>
               <tbody>

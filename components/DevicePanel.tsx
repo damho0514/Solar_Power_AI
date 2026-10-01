@@ -20,9 +20,9 @@ const STATE_LABEL: Record<DeviceView["state"], string> = {
 export default function DevicePanel({ url, setUrl, view, onToggle }: Props) {
   const on = view.state !== "off";
   return (
-    <section className="panel">
-      <header className="panel-head">
-        <h2>⑦ 실제 기기 연결 (MQTT)</h2>
+    <div className="device">
+      <header className="card-head">
+        <h3>MQTT 브로커</h3>
         <span className={`muted ${view.state === "connected" ? "ok" : ""}`}>{STATE_LABEL[view.state]}</span>
       </header>
       <div className="device-row">
@@ -33,10 +33,10 @@ export default function DevicePanel({ url, setUrl, view, onToggle }: Props) {
       </div>
       {view.error && <p className="report-body error">{view.error}</p>}
       {on && view.lamps.length === 0 && view.cameras.length === 0 && (
-        <p className="muted">아직 들어온 기기가 없습니다. device/sensor_agent.py 또는 edge_camera.py를 실행하세요.</p>
+        <p className="muted">아직 들어온 장비가 없어요. device/sensor_agent.py 또는 edge_camera.py를 실행하세요.</p>
       )}
       {(view.lamps.length > 0 || view.cameras.length > 0) && (
-        <table className="tracks">
+        <table className="table">
           <thead>
             <tr>
               <th>기기</th>
@@ -67,7 +67,7 @@ export default function DevicePanel({ url, setUrl, view, onToggle }: Props) {
           </tbody>
         </table>
       )}
-      <p className="muted">기기 값이 들어온 가로등은 시뮬레이터 대신 실제 측정값으로 고장을 판정하고, 계산한 밝기를 명령으로 돌려보냅니다.</p>
-    </section>
+      <p className="muted">실제 장비 값이 들어온 가로등은 가상 데이터 대신 실제 측정값으로 고장을 판정하고, AI가 정한 밝기를 장비에 명령으로 보내요. 휴대폰·배포 사이트(https)에서는 보안 정책상 로컬 브로커(ws://)에 연결할 수 없어요.</p>
+    </div>
   );
 }

@@ -2,9 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import CameraPanel, { FRAME_WIDTH_M, speedKmh, type CameraFrame } from "@/components/CameraPanel";
+import CameraDock from "@/components/CameraDock";
+import { FRAME_WIDTH_M, speedKmh, type CameraFrame } from "@/components/CameraPanel";
 import DevicePanel, { type DeviceView } from "@/components/DevicePanel";
+import Icon, { type IconName } from "@/components/Icon";
+import LampDetail, { KIND_LABEL } from "@/components/LampDetail";
 import ReportPanel from "@/components/ReportPanel";
+import SchoolZonePanel from "@/components/SchoolZonePanel";
 import SolarPanel, { type SolarSummary } from "@/components/SolarPanel";
 import StreetMap from "@/components/StreetMap";
 import TrafficChart from "@/components/TrafficChart";
@@ -12,8 +16,10 @@ import { LABELS } from "@/lib/detectors";
 import { connectDevices, type DeviceLink } from "@/lib/device";
 import { FEATURE_NAMES } from "@/lib/features";
 import { BIN_MS } from "@/lib/forecast";
+import type { View } from "@/lib/gesture";
 import { loadModels, resetLamp, scoreLamp, type Models } from "@/lib/ml";
 import { PredictiveLighting, arrival, type MapTarget } from "@/lib/predictive";
+import { EVENT_LABEL, SchoolZoneMonitor, policyAt, type Sign } from "@/lib/schoolzone";
 import {
   RATED_WATT,
   ROAD_H_Y,
@@ -30,39 +36,70 @@ import {
   targetBrightness,
   verdict,
   zoneFor,
-  type FaultKind,
   type Lamp,
   type Method,
   type Walker,
 } from "@/lib/sim";
-import type { View } from "@/lib/gesture";
 import { Tracker, isMoving } from "@/lib/tracker";
 
-const METHODS: { id: Method; label: string; note: string }[] = [
-  { id: "rule", label: "규칙", note: "사람이 정한 기준값" },
-  { id: "anomaly", label: "로버스트 z", note: "정상 데이터만 학습 · 5분 연속" },
-  { id: "classifier", label: "Random Forest", note: "고장 종류까지 학습 · 3분 연속" },
+type Tab = "live" | "school" | "facility" | "energy" | "report";
+
+// 화면마다 제목과 한 줄 설명. 담당자가 처음 봐도 "이 화면이 뭘 하는지" 알 수 있게 쓴다.
+const TABS: { id: Tab; label: string; icon: IconName; title: string; desc: string }[] = [
+  { id: "live", label: "관제", icon: "map", title: "실시간 관제", desc: "AI가 도로를 보고 필요한 곳만 밝게 켜요" },
+  { id: "school", label: "스쿨존", icon: "school", title: "어린이보호구역", desc: "과속·충돌 위험·불법 주정차를 찾아 전광판으로 알려요" },
+  { id: "facility", label: "시설 점검", icon: "wrench", title: "시설 점검", desc: "고장 날 가로등을 미리 찾아 알려요" },
+  { id: "energy", label: "에너지", icon: "bolt", title: "에너지·탄소", desc: "아낀 전기와 줄인 탄소, 내일 태양광 충전 예보" },
+  { id: "report", label: "보고서", icon: "report", title: "AI 보고서", desc: "오늘 현황을 보고서로 정리해요" },
 ];
-const KIND_LABEL: Record<FaultKind | "unknown", string> = {
-  voltage: "전압 불안정",
-  overheat: "과열",
-  driver: "LED 드라이버 열화",
-  unknown: "이상 (종류 모름)",
-};
+
+const METHODS: { id: Method; label: string; note: string }[] = [
+  { id: "rule", label: "기본 규칙", note: "사람이 정한 기준값으로 판정" },
+  { id: "anomaly", label: "이상 패턴 AI", note: "평소와 다른 패턴이 5분 이어지면 알림" },
+  { id: "classifier", label: "고장 유형 AI", note: "어떤 고장인지까지 판정 · 3분 연속" },
+];
 
 const FRAME_MS = 250; // 조명·지도 갱신 주기
 const SENSOR_EVERY = 4; // 센서는 1초(= 현장 1분)마다
+// 전력 1kWh를 쓰면 나오는 온실가스 (전력 배출계수 가정값. 지자체가 쓰는 기준값으로 바꿔 쓰세요)
+const KG_CO2_PER_KWH = 0.4594;
 
-function Sparkline({ values, color, min, max }: { values: number[]; color: string; min?: number; max?: number }) {
-  if (values.length < 2) return <svg className="spark" />;
-  const lo = min ?? Math.min(...values);
-  const hi = max ?? Math.max(...values);
-  const span = hi - lo || 1;
-  const pts = values.map((v, i) => `${(i / (values.length - 1)) * 100},${28 - ((v - lo) / span) * 26}`).join(" ");
+const VOICE: Partial<Record<Sign["level"], string>> = {
+  danger: "차량이 다가오고 있어요. 멈추세요.",
+  slow: "어린이 보호구역입니다. 속도를 줄이세요.",
+};
+
+function Kpi({ label, value, sub, tone, icon, onClick }: { label: string; value: string; sub?: string; tone?: string; icon: IconName; onClick?: () => void }) {
   return (
-    <svg className="spark" viewBox="0 0 100 30" preserveAspectRatio="none">
-      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.8} vectorEffect="non-scaling-stroke" />
-    </svg>
+    <button className={`kpi tone-${tone ?? "base"}`} onClick={onClick} disabled={!onClick}>
+      <span className="kpi-top">
+        <span className="kpi-icon">
+          <Icon name={icon} size={18} />
+        </span>
+        <span className="kpi-label">{label}</span>
+      </span>
+      <b className="kpi-value">{value}</b>
+      {sub && <span className="kpi-sub">{sub}</span>}
+    </button>
+  );
+}
+
+function Legend() {
+  return (
+    <details className="legend">
+      <summary>지도 보는 법</summary>
+      <div>
+        <span><i className="dot" style={{ background: "var(--ok)" }} />정상 가로등</span>
+        <span><i className="dot" style={{ background: "var(--warn)" }} />이상 징후</span>
+        <span><i className="dot" style={{ background: "var(--bad)" }} />점검 필요</span>
+        <span><i className="dot ring" />미리 켠 가로등</span>
+        <span><i className="dot" style={{ background: "var(--target)" }} />카메라가 본 사람·차 (점선은 예상 경로)</span>
+        <span><i className="sq" style={{ background: "var(--zone)" }} />어린이보호구역·횡단보도</span>
+        <span><i className="sq" style={{ background: "var(--car)" }} />가상 차량</span>
+        <span><i className="dot" style={{ background: "var(--person)" }} />가상 보행자</span>
+        <span><i className="sq outline" />실제 장비와 연결된 가로등</span>
+      </div>
+    </details>
   );
 }
 
@@ -94,6 +131,25 @@ export default function Home() {
   const [deviceError, setDeviceError] = useState("");
   const [brokerUrl, setBrokerUrl] = useState("ws://localhost:9001");
   const [method, setMethod] = useState<Method>("rule");
+  const zoneRef = useRef(new SchoolZoneMonitor());
+  const [tab, setTabState] = useState<Tab>("live");
+  const lastSpoken = useRef<Sign["level"]>("idle");
+
+  // 주소 끝 #school 처럼 탭을 기억해 링크로 공유할 수 있게 한다
+  const setTab = useCallback((t: Tab) => {
+    setTabState(t);
+    history.replaceState(null, "", `#${t}`);
+    window.scrollTo({ top: 0 });
+  }, []);
+  useEffect(() => {
+    const read = () => {
+      const h = location.hash.slice(1) as Tab;
+      if (TABS.some((t) => t.id === h)) setTabState(h);
+    };
+    read();
+    window.addEventListener("hashchange", read);
+    return () => window.removeEventListener("hashchange", read);
+  }, []);
 
   // 랜덤 값이 들어가므로 서버 렌더와 어긋나지 않게 브라우저에서만 만든다.
   useEffect(() => {
@@ -117,6 +173,7 @@ export default function Home() {
       const { ctx, targets, forecast, idle } = brain.step(performance.now());
       moveWalkers(walkersRef.current);
       const now = performance.now();
+      zoneRef.current.onSim(walkersRef.current, now);
       for (const l of lampsRef.current) {
         const target = targetBrightness(l, walkersRef.current, ctx);
         stepBrightness(l, target);
@@ -152,7 +209,10 @@ export default function Home() {
     return () => clearInterval(id);
   }, [ready]);
 
-  const onFrame = useCallback((f: CameraFrame) => brainRef.current?.onFrame(f), []);
+  const onFrame = useCallback((f: CameraFrame) => {
+    brainRef.current?.onFrame(f);
+    zoneRef.current.onCamera(f);
+  }, []);
   // 손동작으로 카메라 구간을 옮기면 지도와 가로등 제어가 새 구간을 따른다
   const onCamView = useCallback((v: View) => setCamZone(lampsRef.current, zoneFor(v.x, v.zoom)), []);
 
@@ -221,7 +281,30 @@ export default function Home() {
     }
   }
 
-  if (!ready) return <main className="loading">관제 시스템 시작 중…</main>;
+  const zone = zoneRef.current;
+  const sign = ready ? zone.signAt(performance.now()) : { level: "idle" as const, text: "", sub: "" };
+
+  // 위험 문구가 새로 뜰 때만 음성으로 한 번 읽는다
+  useEffect(() => {
+    if (sign.level === lastSpoken.current) return;
+    lastSpoken.current = sign.level;
+    const text = VOICE[sign.level];
+    if (!text || !zone.settings.voice || typeof speechSynthesis === "undefined") return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "ko-KR";
+    speechSynthesis.speak(u);
+  });
+
+  if (!ready)
+    return (
+      <main className="loading">
+        <span className="brand-mark" aria-hidden>
+          <Icon name="lamp" size={22} />
+        </span>
+        관제 시스템을 켜는 중…
+      </main>
+    );
 
   const lamps = lampsRef.current;
   const brain = brainRef.current!;
@@ -229,6 +312,7 @@ export default function Home() {
   const stats = brain.stats();
   const { actualWh, fullWh } = energyRef.current;
   const savingPct = fullWh ? (1 - actualWh / fullWh) * 100 : 0;
+  const savedWh = fullWh - actualWh;
   const alertOf = (l: Lamp) => verdict(l, method);
   const flagged = lamps.filter((l) => alertOf(l) !== null).sort((a, b) => a.health - b.health);
   const scores = METHODS.map((m) => ({ ...m, ...detectionScore(lamps, m.id) }));
@@ -236,6 +320,10 @@ export default function Home() {
   const selected = lamps.find((l) => l.id === selectedId) ?? null;
   const mainRoad = lamps.filter((l) => Math.abs(l.y - ROAD_H_Y) < 50 && l.y < ROAD_H_Y);
   const lampAt = (x: number) => mainRoad.find((l) => l.x === x)?.id ?? "";
+  const policy = policyAt(new Date(), zone.settings);
+  const current = TABS.find((t) => t.id === tab)!;
+  const mapAlert = (l: Lamp) => (alertOf(l) === null ? null : l.health < 60 ? "bad" : "warn");
+  const select = (id: string) => setSelectedId((s) => (s === id ? null : id));
 
   const nowMs = performance.now();
   const deviceView: DeviceView = {
@@ -259,7 +347,7 @@ export default function Home() {
   const buildReportInput = () => ({
     total: lamps.length,
     savingPct,
-    savedWh: fullWh - actualWh,
+    savedWh,
     camera: {
       total: brain.total,
       person: brain.byKind.person,
@@ -269,6 +357,14 @@ export default function Home() {
       nextForecast: view.forecast?.[0] ?? null,
       binSeconds: BIN_MS / 1000,
       idleReason: view.idleReason,
+    },
+    school: {
+      period: policy.period,
+      limit: policy.limit,
+      counts: zone.counts,
+      slowRate: zone.slowRate(),
+      warned: zone.warned,
+      recent: zone.events.filter((e) => e.kind !== "crossing").slice(0, 8).map((e) => `${EVENT_LABEL[e.kind]}: ${e.text}`),
     },
     solar: solarRef.current,
     method: methodLabel,
@@ -282,239 +378,299 @@ export default function Home() {
     })),
   });
 
-  return (
-    <main>
-      <header className="top">
-        <div>
-          <h1>스마트 가로등 관제 데모</h1>
-          <p className="muted">웹캠 AI로 사람·차를 추적하고, 이동과 통행량을 예측해 가로등을 미리 켭니다</p>
-          <Link className="muted" href="/siting">태양광 입지 분석 →</Link>
-        </div>
-        <div className="kpis">
-          <div className="kpi">
-            <span className="kpi-label">디밍 절감률</span>
-            <span className="kpi-value ok">{savingPct.toFixed(1)}%</span>
-          </div>
-          <div className="kpi">
-            <span className="kpi-label">카메라 누적 통행</span>
-            <span className="kpi-value">{brain.total}건</span>
-          </div>
-          <div className="kpi">
-            <span className="kpi-label">선제 점등 중</span>
-            <span className="kpi-value">{view.prelit}개</span>
-          </div>
-          <div className="kpi">
-            <span className="kpi-label">고장 이상 징후</span>
-            <span className={`kpi-value ${flagged.length ? "warn" : ""}`}>{flagged.length}개</span>
-          </div>
-        </div>
+  const map = (compact = false) => (
+    <StreetMap
+      lamps={lamps}
+      walkers={walkersRef.current}
+      selectedId={selectedId}
+      onSelect={select}
+      targets={view.targets}
+      alert={mapAlert}
+      sign={sign}
+      limit={policy.limit}
+      compact={compact}
+    />
+  );
+
+  const lampPanel = selected && (
+    <section className="card">
+      <header className="card-head">
+        <h2>가로등 상세</h2>
+        <button className="icon-btn" onClick={() => setSelectedId(null)} aria-label="닫기">
+          <Icon name="close" size={18} />
+        </button>
       </header>
+      <LampDetail lamp={selected} verdict={alertOf(selected)} />
+    </section>
+  );
 
-      <div className="grid">
-        <div className="col">
-          <CameraPanel onFrame={onFrame} onView={onCamView} />
+  return (
+    <div className="app">
+      <aside className="rail">
+        <Link href="/" className="brand" onClick={() => setTab("live")}>
+          <span className="brand-mark" aria-hidden>
+            <Icon name="lamp" size={20} />
+          </span>
+          <span className="brand-name">
+            DAMO<small>안심 가로등</small>
+          </span>
+        </Link>
+        <nav className="rail-nav" aria-label="메뉴">
+          {TABS.map((t) => (
+            <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} aria-current={tab === t.id ? "page" : undefined}>
+              <Icon name={t.icon} />
+              <span>{t.title}</span>
+              {t.id === "school" && zone.risks() > 0 && <em className="badge">{zone.risks()}</em>}
+              {t.id === "facility" && flagged.length > 0 && <em className="badge">{flagged.length}</em>}
+            </button>
+          ))}
+        </nav>
+        <Link href="/siting" className="rail-extra">
+          <Icon name="sun" />
+          <span>태양광 설치 검토</span>
+        </Link>
+      </aside>
 
-          <section className="panel">
-            <header className="panel-head">
-              <h2>② 이동 예측</h2>
-              <span className="muted">1초 뒤 위치를 예측하고 실제와 비교</span>
-            </header>
-            <p className={`camera-state ${view.seeing ? "on" : ""}`}>
-              {view.seeing ? "💡 카메라 구간 100%" : "🌙 카메라 구간 대기 밝기"}
-            </p>
-            {brain.active.length === 0 && brain.ghosts.length === 0 ? (
-              <p className="muted">추적 중인 대상이 없습니다.</p>
-            ) : (
-              <table className="tracks">
-                <thead>
-                  <tr>
-                    <th>번호</th>
-                    <th>종류</th>
-                    <th>방향·속도</th>
-                    <th>예측</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {brain.active.map((t) => {
-                    const a = arrival(t, mainRoad.map((l) => l.x));
-                    return (
-                      <tr key={t.id}>
-                        <td>#{t.id}</td>
-                        <td>{t.label}</td>
-                        <td>{isMoving(t) ? `${t.vx > 0 ? "→" : "←"} ${speedKmh(t).toFixed(1)}km/h` : "정지"}</td>
-                        <td>{a ? `${lampAt(a.x)}까지 ${a.seconds.toFixed(1)}초` : "-"}</td>
-                      </tr>
-                    );
-                  })}
-                  {brain.ghosts.map((g) => (
-                    <tr key={`g${g.id}`} className="ghost">
-                      <td>#{g.id}</td>
-                      <td>{g.label}</td>
-                      <td>{g.v > 0 ? "→" : "←"} 화면 밖</td>
-                      <td>속도로 위치 추정 중</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            <p className="muted">
-              {stats.predSamples > 0
-                ? `1초 뒤 위치 예측 평균 오차 ${(stats.predErr! * FRAME_WIDTH_M * 100).toFixed(0)}cm (${stats.predSamples}회 채점, 화면 폭 ${FRAME_WIDTH_M}m 가정)`
-                : "움직이는 대상이 생기면 예측 정확도를 채점합니다."}
-            </p>
-          </section>
+      <div className="main">
+        <header className="appbar">
+          <span className="brand-mark mobile-only" aria-hidden>
+            <Icon name="lamp" size={18} />
+          </span>
+          <div className="appbar-title">
+            <h1>{current.title}</h1>
+            <p>{current.desc}</p>
+          </div>
+          <button className={`zone-chip vms-${sign.level}`} onClick={() => setTab("school")} aria-label="어린이보호구역 전광판 상태">
+            <Icon name="school" size={16} />
+            <span>{sign.level === "idle" ? `스쿨존 ${policy.limit}km/h` : sign.text}</span>
+          </button>
+        </header>
 
-          <DevicePanel url={brokerUrl} setUrl={setBrokerUrl} view={deviceView} onToggle={toggleDevices} />
-
-          <section className="panel">
-            <header className="panel-head">
-              <h2>③ 통행량 예측</h2>
-              <span className="muted">카메라가 센 통행량으로 예측</span>
-            </header>
-            <TrafficChart bins={brain.forecaster.bins} current={brain.forecaster.current} forecast={view.forecast} />
-            <p className="policy">{view.idleReason}</p>
-            <p className="muted">
-              {stats.forecastSamples > 0
-                ? `예측 평균 오차 ${stats.forecastMae!.toFixed(2)}건 · "직전과 같다" 단순 예측 ${stats.naiveMae!.toFixed(2)}건 (${stats.forecastSamples}구간 채점)`
-                : `예측은 ${BIN_MS / 1000}초 구간 3개가 쌓이면 시작합니다.`}
-            </p>
-          </section>
-        </div>
-
-        <div className="col wide">
-          <section className="panel">
-            <header className="panel-head">
-              <h2>관제 지도</h2>
-              <span className="muted">점을 누르면 상세 센서값 · 1초 = 현장 1분</span>
-            </header>
-            <StreetMap
-              lamps={lamps}
-              walkers={walkersRef.current}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              targets={view.targets}
-              alert={(l) => (alertOf(l) === null ? null : l.health < 60 ? "bad" : "warn")}
-            />
-            <div className="legend">
-              <span><i style={{ background: "var(--target)", borderRadius: "50%" }} />카메라 추적 대상 (점선=예측 경로·화면 밖 추정)</span>
-              <span><i style={{ border: "2px solid var(--target)", borderRadius: "50%", background: "transparent" }} />선제 점등</span>
-              <span><i style={{ border: "2px solid var(--accent)", background: "transparent" }} />실제 기기</span>
-              <span><i style={{ background: "var(--ok)" }} />정상</span>
-              <span><i style={{ background: "var(--warn)" }} />이상 징후</span>
-              <span><i style={{ background: "var(--bad)" }} />점검 필요</span>
-              <span><i style={{ background: "var(--car)" }} />가상 차량</span>
-              <span><i style={{ background: "var(--person)", borderRadius: "50%" }} />가상 보행자</span>
-            </div>
-          </section>
-
-          <div className="row">
-            <section className="panel">
-              <header className="panel-head">
-                <h2>④ 고장 예측</h2>
-                <button
-                  className="btn small"
-                  onClick={() => {
-                    const l = injectFault(lamps);
-                    if (l) setSelectedId(l.id);
-                  }}
-                >
-                  고장 몰래 심기
-                </button>
-              </header>
-              <div className="methods" role="radiogroup" aria-label="판정 방법">
-                {scores.map((m) => (
-                  <button
-                    key={m.id}
-                    role="radio"
-                    aria-checked={method === m.id}
-                    className={`method ${method === m.id ? "on" : ""}`}
-                    disabled={m.id !== "rule" && !modelsRef.current}
-                    onClick={() => setMethod(m.id)}
-                  >
-                    <b>{m.label}</b>
-                    <span>{m.note}</span>
-                    <span className="method-score">
-                      탐지 {m.caught}/{m.faulty} · 오탐 {m.falseAlarms}
-                    </span>
-                  </button>
-                ))}
+        <main className="content">
+          {tab === "live" && (
+            <div className="stack">
+              <div className="kpis">
+                <Kpi icon="bolt" label="전기 절약" value={`${savingPct.toFixed(0)}%`} sub="항상 100% 켤 때보다" tone="ok" onClick={() => setTab("energy")} />
+                <Kpi icon="lamp" label="미리 켠 가로등" value={`${view.prelit}개`} sub={`카메라 통행 ${brain.total}건`} />
+                <Kpi icon="school" label="스쿨존 위험" value={`${zone.risks()}건`} sub="오늘 과속·충돌 위험·주정차" tone={zone.risks() ? "warn" : "base"} onClick={() => setTab("school")} />
+                <Kpi icon="wrench" label="점검 필요" value={`${flagged.length}개`} sub={`전체 ${lamps.length}개 중`} tone={flagged.length ? "bad" : "base"} onClick={() => setTab("facility")} />
               </div>
-              {flagged.length === 0 ? (
-                <p className="muted">데이터를 모으는 중이거나 이상 징후가 없습니다.</p>
-              ) : (
-                <ul className="issues">
-                  {flagged.map((l) => (
-                    <li key={l.id} className={selectedId === l.id ? "active" : ""} onClick={() => setSelectedId(l.id)}>
-                      <strong>{l.id}</strong>
-                      <span className={`health ${l.health < 60 ? "bad" : "warn"}`}>{l.health}점</span>
-                      <span>{KIND_LABEL[alertOf(l)!]}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
 
-            <section className="panel">
-              <header className="panel-head">
-                <h2>{selected ? `${selected.id} 상세` : "가로등 상세"}</h2>
-                {selected && (
+              <section className="card map-card">
+                <header className="card-head">
+                  <h2>도로 현황</h2>
+                  <span className="muted">가로등을 누르면 상태를 볼 수 있어요 · 1초 = 현장 1분</span>
+                </header>
+                {map()}
+                <Legend />
+              </section>
+
+              {lampPanel}
+
+              <div className="grid-2">
+                <section className="card">
+                  <header className="card-head">
+                    <h2>움직임 예측</h2>
+                    <span className={`pill ${view.seeing ? "tone-ok" : ""}`}>{view.seeing ? "카메라 구간 100% 점등" : "대기 밝기"}</span>
+                  </header>
+                  <p className="muted">사람·차가 가는 방향을 예측해 앞쪽 가로등을 미리 켜요. 화면 밖으로 나가도 위치를 계속 추정해요.</p>
+                  {brain.active.length === 0 && brain.ghosts.length === 0 ? (
+                    <p className="empty">지금 카메라에 잡힌 사람·차가 없어요.</p>
+                  ) : (
+                    <div className="table-wrap">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>번호</th>
+                            <th>종류</th>
+                            <th>방향·속도</th>
+                            <th>다음 가로등</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {brain.active.map((t) => {
+                            const a = arrival(t, mainRoad.map((l) => l.x));
+                            return (
+                              <tr key={t.id}>
+                                <td>#{t.id}</td>
+                                <td>{t.label}</td>
+                                <td>{isMoving(t) ? `${t.vx > 0 ? "→" : "←"} ${speedKmh(t).toFixed(1)}km/h` : "멈춤"}</td>
+                                <td>{a ? `${lampAt(a.x)} · ${a.seconds.toFixed(1)}초 뒤` : "-"}</td>
+                              </tr>
+                            );
+                          })}
+                          {brain.ghosts.map((g) => (
+                            <tr key={`g${g.id}`} className="ghost">
+                              <td>#{g.id}</td>
+                              <td>{g.label}</td>
+                              <td>{g.v > 0 ? "→" : "←"} 화면 밖</td>
+                              <td>위치 추정 중</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <p className="muted small">
+                    {stats.predSamples > 0
+                      ? `1초 뒤 위치 예측 오차 평균 ${(stats.predErr! * FRAME_WIDTH_M * 100).toFixed(0)}cm (${stats.predSamples}번 채점)`
+                      : "움직이는 대상이 생기면 예측이 얼마나 맞는지 채점해요."}
+                  </p>
+                </section>
+
+                <section className="card">
+                  <header className="card-head">
+                    <h2>통행량 예측과 밝기</h2>
+                  </header>
+                  <p className="muted">다음 시간대 통행량을 예측해, 한산할 때는 밝기를 낮춰 전기를 아껴요.</p>
+                  <TrafficChart bins={brain.forecaster.bins} current={brain.forecaster.current} forecast={view.forecast} />
+                  <p className="policy">{view.idleReason}</p>
+                  <p className="muted small">
+                    {stats.forecastSamples > 0
+                      ? `예측 오차 평균 ${stats.forecastMae!.toFixed(2)}건 · "직전과 같다"고 볼 때 ${stats.naiveMae!.toFixed(2)}건`
+                      : `${BIN_MS / 1000}초 구간 3개가 쌓이면 예측을 시작해요.`}
+                  </p>
+                </section>
+              </div>
+            </div>
+          )}
+
+          {tab === "school" && (
+            <SchoolZonePanel zone={zone} sign={sign} onChange={() => force((n) => n + 1)} map={map()} />
+          )}
+
+          {tab === "facility" && (
+            <div className="stack">
+              <section className="card">
+                <header className="card-head">
+                  <h2>고장 미리 알림</h2>
                   <button
                     className="btn small"
                     onClick={() => {
-                      repairLamp(selected);
-                      resetLamp(selected.id);
+                      const l = injectFault(lamps);
+                      if (l) setSelectedId(l.id);
                     }}
                   >
-                    수리 완료 처리
+                    고장 시연하기
                   </button>
-                )}
-              </header>
-              {!selected ? (
-                <p className="muted">지도나 목록에서 가로등을 선택하세요.</p>
-              ) : (
-                <div className="detail">
-                  <div className="metric">
-                    <span>전압</span>
-                    <b>{selected.voltage.toFixed(1)}V</b>
-                    <Sparkline values={selected.history.voltage} color="var(--chart-1)" min={170} max={260} />
-                  </div>
-                  <div className="metric">
-                    <span>전류</span>
-                    <b>{selected.current.toFixed(3)}A</b>
-                    <Sparkline values={selected.history.current} color="var(--chart-2)" min={0} max={0.8} />
-                  </div>
-                  <div className="metric">
-                    <span>온도</span>
-                    <b>{selected.temp.toFixed(1)}°C</b>
-                    <Sparkline values={selected.history.temp} color="var(--chart-3)" min={10} max={85} />
-                  </div>
-                  <p className="muted">
-                    밝기 {Math.round(selected.brightness * 100)}%
-                    {selected.litBy === "predict" ? " (선제 점등)" : selected.litBy === "camera" ? " (카메라 감지)" : ""} · 배터리{" "}
-                    {selected.battery.toFixed(0)}% · 어제 발전량 {selected.solarWh.toFixed(0)}Wh · 건강도 {selected.health}점
-                  </p>
-                  {selected.ml && (
-                    <p className="muted">
-                      ML 판정 · Random Forest: {selected.ml.kind === "normal" ? "정상" : KIND_LABEL[selected.ml.kind]} (확률{" "}
-                      {(selected.ml.prob * 100).toFixed(0)}%) · 로버스트 z {selected.ml.anomaly.toFixed(1)}
-                      {selected.ml.anomalyFlag ? " (이상)" : ""}
-                    </p>
-                  )}
-                  {selected.issues.map((i) => (
-                    <p key={i.kind} className="issue-detail">
-                      <b>{i.label}</b> {i.detail}
-                    </p>
+                </header>
+                <p className="muted">전압·전류·온도 흐름을 AI가 보고, 고장 나기 전에 이상한 가로등을 찾아요. "고장 시연하기"를 누르면 몰래 고장을 심고 몇 초 만에 찾는지 볼 수 있어요.</p>
+                <div className="segmented" role="radiogroup" aria-label="판정 방식">
+                  {scores.map((m) => (
+                    <button
+                      key={m.id}
+                      role="radio"
+                      aria-checked={method === m.id}
+                      className={method === m.id ? "on" : ""}
+                      disabled={m.id !== "rule" && !modelsRef.current}
+                      onClick={() => setMethod(m.id)}
+                    >
+                      <b>{m.label}</b>
+                      <span>{m.note}</span>
+                      <span className="seg-score">
+                        찾아냄 {m.caught}/{m.faulty} · 잘못 알림 {m.falseAlarms}
+                      </span>
+                    </button>
                   ))}
                 </div>
+                {flagged.length === 0 ? (
+                  <p className="empty">지금은 점검이 필요한 가로등이 없어요.</p>
+                ) : (
+                  <ul className="list">
+                    {flagged.map((l) => (
+                      <li key={l.id}>
+                        <button className={selectedId === l.id ? "on" : ""} onClick={() => select(l.id)}>
+                          <b>{l.id}</b>
+                          <span>{KIND_LABEL[alertOf(l)!]}</span>
+                          <span className={`score tone-${l.health < 60 ? "bad" : "warn"}`}>{l.health}점</span>
+                          <Icon name="chevron" size={16} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              {lampPanel ?? (
+                <section className="card">
+                  <p className="empty">목록이나 지도에서 가로등을 고르면 센서 값을 보여 줘요.</p>
+                </section>
               )}
-            </section>
-          </div>
+              <section className="card map-card">
+                <header className="card-head">
+                  <h2>위치</h2>
+                </header>
+                {map()}
+              </section>
+              <details className="card settings">
+                <summary>
+                  <h2>실제 장비 연결 (개발자용)</h2>
+                  <Icon name="chevron" size={18} />
+                </summary>
+                <DevicePanel url={brokerUrl} setUrl={setBrokerUrl} view={deviceView} onToggle={toggleDevices} />
+              </details>
+            </div>
+          )}
 
-          <SolarPanel lamps={lamps} onSelect={setSelectedId} summaryRef={solarRef} />
+          {tab === "energy" && (
+            <div className="stack">
+              <div className="kpis">
+                <Kpi icon="bolt" label="전기 절약률" value={`${savingPct.toFixed(1)}%`} sub="항상 100%로 켤 때 대비" tone="ok" />
+                <Kpi icon="gauge" label="아낀 전기" value={`${(savedWh / 1000).toFixed(2)}kWh`} sub={`가로등 ${lamps.length}개 · ${RATED_WATT}W 기준`} />
+                <Kpi icon="leaf" label="줄인 탄소" value={`${((savedWh / 1000) * KG_CO2_PER_KWH).toFixed(2)}kg`} sub={`CO₂ 환산 · 배출계수 ${KG_CO2_PER_KWH}`} tone="ok" />
+              </div>
+              <section className="card">
+                <header className="card-head">
+                  <h2>어떻게 아끼나요?</h2>
+                </header>
+                <ul className="bullets">
+                  <li>사람·차가 없을 땐 20~50%로 낮춰 두고, 다가오면 미리 100%로 켜요.</li>
+                  <li>통행량이 많을 것으로 예상되는 시간대엔 대기 밝기를 높여 안전을 먼저 챙겨요.</li>
+                  <li>어린이보호구역 횡단보도는 보행자가 보이면 항상 최대 밝기로 켜요.</li>
+                </ul>
+              </section>
+              <SolarPanel lamps={lamps} onSelect={(id) => { setSelectedId(id); setTab("facility"); }} summaryRef={solarRef} />
+            </div>
+          )}
 
-          <ReportPanel buildInput={buildReportInput} />
-        </div>
+          {tab === "report" && (
+            <div className="stack">
+              <ReportPanel buildInput={buildReportInput} />
+              <Link href="/siting" className="card link-card">
+                <span className="kpi-icon">
+                  <Icon name="sun" size={18} />
+                </span>
+                <div>
+                  <b>태양광 설치 검토</b>
+                  <p className="muted">주소를 넣으면 지목·용도지역과 지자체 조례를 확인해 설치 가능성을 알려 줘요.</p>
+                </div>
+                <Icon name="chevron" size={18} />
+              </Link>
+            </div>
+          )}
+        </main>
       </div>
-    </main>
+
+      <nav className="tabbar" aria-label="메뉴">
+        {TABS.map((t) => (
+          <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)} aria-current={tab === t.id ? "page" : undefined}>
+            <span className="tab-icon">
+              <Icon name={t.icon} size={22} />
+              {t.id === "school" && zone.risks() > 0 && <i className="tab-dot" />}
+              {t.id === "facility" && flagged.length > 0 && <i className="tab-dot bad" />}
+            </span>
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      <CameraDock
+        onFrame={onFrame}
+        onView={onCamView}
+        onShowMap={() => setTab("live")}
+        inset={map(true)}
+        privacy={zone.settings.privacy}
+        alert={sign.level === "danger" || sign.level === "slow" ? `${sign.text} · ${sign.sub}` : null}
+      />
+    </div>
   );
 }
