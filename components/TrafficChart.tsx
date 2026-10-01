@@ -63,12 +63,12 @@ export default function TrafficChart({ bins, current, forecast }: Props) {
           <>
             <polyline points={fcLine} fill="none" stroke="var(--chart-1)" strokeWidth={2} strokeDasharray="5 4" />
             {fc.map((v, k) => (
-              <circle key={k} cx={x(nowIdx + 1 + k) + barW / 2} cy={y(v)} r={4} fill="var(--panel)" stroke="var(--chart-1)" strokeWidth={2} />
+              <circle key={k} cx={x(nowIdx + 1 + k) + barW / 2} cy={y(v)} r={4} fill="var(--surface)" stroke="var(--chart-1)" strokeWidth={2} />
             ))}
           </>
         )}
 
-        <line x1={x(nowIdx) - 2} x2={x(nowIdx) - 2} y1={PAD.t} y2={base} stroke="var(--muted)" strokeDasharray="2 3" />
+        <line x1={x(nowIdx) - 2} x2={x(nowIdx) - 2} y1={PAD.t} y2={base} stroke="var(--text-3)" strokeDasharray="2 3" />
         <text x={x(nowIdx) - 6} y={H - 6} textAnchor="end" className="axis">
           지금
         </text>

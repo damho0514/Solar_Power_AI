@@ -1,6 +1,7 @@
 "use client";
 
 import type { MapTarget } from "@/lib/predictive";
+import { ZONE, inZone, simSpeedKmh, type Sign } from "@/lib/schoolzone";
 import { MAP_H, MAP_W, ROAD_H_Y, ROAD_V_X, camZone, walkerXY, type Lamp, type Walker } from "@/lib/sim";
 
 type Props = {
@@ -10,15 +11,20 @@ type Props = {
   onSelect: (id: string) => void;
   targets: MapTarget[];
   alert: (l: Lamp) => "bad" | "warn" | null;
+  sign?: Sign; // 스쿨존 전광판 현재 문구
+  limit?: number; // 스쿨존 제한속도
+  compact?: boolean; // 작은 미리보기 (글자·범례 생략)
 };
 
-export default function StreetMap({ lamps, walkers, selectedId, onSelect, targets, alert }: Props) {
+const SIGN_COLOR: Record<Sign["level"], string> = { idle: "#1f2a3d", child: "#b7791f", slow: "#c2410c", danger: "#b91c1c" };
+
+export default function StreetMap({ lamps, walkers, selectedId, onSelect, targets, alert, sign, limit = 30, compact }: Props) {
   const statusColor = (l: Lamp) => {
     const a = alert(l);
     return a === "bad" ? "var(--bad)" : a === "warn" ? "var(--warn)" : "var(--ok)";
   };
   return (
-    <svg className="map" viewBox={`0 0 ${MAP_W} ${MAP_H}`} role="img" aria-label="가로등 관제 지도">
+    <svg className={`map${compact ? " compact" : ""}`} viewBox={`0 0 ${MAP_W} ${MAP_H}`} role="img" aria-label="가로등 관제 지도">
       <defs>
         <radialGradient id="glow">
           <stop offset="0%" stopColor="#ffe8a3" stopOpacity="0.9" />
@@ -32,6 +38,39 @@ export default function StreetMap({ lamps, walkers, selectedId, onSelect, target
       <line x1={0} y1={ROAD_H_Y} x2={MAP_W} y2={ROAD_H_Y} stroke="var(--lane)" strokeDasharray="14 12" strokeWidth={2} />
       <line x1={ROAD_V_X} y1={0} x2={ROAD_V_X} y2={MAP_H} stroke="var(--lane)" strokeDasharray="14 12" strokeWidth={2} />
 
+      {/* 어린이보호구역: 노란 노면, 횡단보도, 학교, 전광판 */}
+      <rect x={ZONE.x0} y={ROAD_H_Y - 22} width={ZONE.x1 - ZONE.x0} height={44} fill="var(--zone-road)" />
+      <line x1={ZONE.x0} y1={ROAD_H_Y - 23} x2={ZONE.x1} y2={ROAD_H_Y - 23} stroke="var(--zone)" strokeWidth={3} />
+      <line x1={ZONE.x0} y1={ROAD_H_Y + 23} x2={ZONE.x1} y2={ROAD_H_Y + 23} stroke="var(--zone)" strokeWidth={3} />
+      {Array.from({ length: 6 }, (_, i) => (
+        <rect key={i} x={ZONE.crossX - 14} y={ROAD_H_Y - 20 + i * 7} width={28} height={4} fill="#f5f7fb" opacity={0.85} />
+      ))}
+      <g transform={`translate(${ZONE.crossX - 34}, ${ROAD_H_Y - 178})`}>
+        <rect width={68} height={44} rx={6} fill="#223049" stroke="var(--zone)" strokeWidth={1.5} />
+        <path d="M10 22 34 9l24 13M16 20v18h36V20M29 38v-9h10v9" fill="none" stroke="var(--zone)" strokeWidth={2} />
+        {!compact && (
+          <text x={34} y={58} textAnchor="middle" className="map-label" fill="var(--zone)">
+            다모초등학교
+          </text>
+        )}
+      </g>
+      {sign && (
+        <g transform={`translate(${ZONE.x0 + 4}, ${ROAD_H_Y + 44})`}>
+          <g className="sign-scale">
+            <line x1={20} y1={0} x2={20} y2={-18} stroke="#94a3b8" strokeWidth={2} />
+            <rect width={compact ? 90 : 128} height={compact ? 30 : 40} rx={5} fill={SIGN_COLOR[sign.level]} stroke="var(--zone)" strokeWidth={1.5} />
+            <text x={compact ? 45 : 64} y={compact ? 20 : 18} textAnchor="middle" className="map-sign" fill="#fff">
+              {sign.text}
+            </text>
+            {!compact && (
+              <text x={64} y={33} textAnchor="middle" className="map-sign-sub" fill="#fde68a">
+                {sign.sub}
+              </text>
+            )}
+          </g>
+        </g>
+      )}
+
       {/* 카메라 구간 표시. 손동작으로 옮겨진다 */}
       <rect
         className="map-cam"
@@ -41,7 +80,7 @@ export default function StreetMap({ lamps, walkers, selectedId, onSelect, target
         height={116}
         rx={10}
         fill="none"
-        stroke="var(--accent)"
+        stroke="var(--map-accent)"
         strokeDasharray="5 5"
       />
       <text
@@ -49,9 +88,9 @@ export default function StreetMap({ lamps, walkers, selectedId, onSelect, target
         x={camZone.x1 > MAP_W - 190 ? camZone.x1 - 6 : camZone.x0 + 6}
         textAnchor={camZone.x1 > MAP_W - 190 ? "end" : "start"}
         y={ROAD_H_Y - 64}
-        fill="var(--accent)"
+        fill="var(--map-accent)"
       >
-        📷 카메라 구간 (웹캠 화면)
+        {compact ? "카메라" : "📷 카메라가 보는 구간"}
       </text>
 
       {lamps.map((l) => (
@@ -60,10 +99,19 @@ export default function StreetMap({ lamps, walkers, selectedId, onSelect, target
 
       {walkers.map((w, i) => {
         const p = walkerXY(w);
-        return w.kind === "car" ? (
-          <rect key={i} x={p.x - 9} y={p.y - 6} width={18} height={12} rx={3} fill="var(--car)" />
-        ) : (
-          <circle key={i} cx={p.x} cy={p.y} r={4.5} fill="var(--person)" />
+        if (w.kind !== "car") return <circle key={i} cx={p.x} cy={p.y} r={4.5} fill="var(--person)" />;
+        const kmh = simSpeedKmh(w);
+        const tag = inZone(p.x, p.y) && !compact;
+        const over = kmh > limit;
+        return (
+          <g key={i}>
+            <rect x={p.x - 9} y={p.y - 6} width={18} height={12} rx={3} fill={tag && over ? "var(--bad)" : "var(--car)"} />
+            {tag && (
+              <text x={p.x} y={p.y - 11} textAnchor="middle" className="map-speed" fill={over ? "#fca5a5" : "#cbd5e1"}>
+                {kmh.toFixed(0)}km/h
+              </text>
+            )}
+          </g>
         );
       })}
 
@@ -87,11 +135,11 @@ export default function StreetMap({ lamps, walkers, selectedId, onSelect, target
             cy={l.y}
             r={6}
             fill={statusColor(l)}
-            stroke={selectedId === l.id ? "var(--text)" : "var(--map-bg)"}
+            stroke={selectedId === l.id ? "#ffffff" : "var(--map-bg)"}
             strokeWidth={selectedId === l.id ? 3 : 2}
           />
           {l.source === "device" && (
-            <rect x={l.x - 11} y={l.y - 11} width={22} height={22} rx={4} fill="none" stroke="var(--accent)" strokeWidth={2} />
+            <rect x={l.x - 11} y={l.y - 11} width={22} height={22} rx={4} fill="none" stroke="var(--map-accent)" strokeWidth={2} />
           )}
           {l.litBy === "predict" && <circle cx={l.x} cy={l.y} r={9} fill="none" stroke="var(--target)" strokeWidth={1.5} />}
           {alert(l) !== null && (

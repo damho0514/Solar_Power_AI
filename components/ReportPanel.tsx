@@ -91,19 +91,19 @@ export default function ReportPanel({ buildInput }: Props) {
   }
 
   return (
-    <section className="panel report">
-      <header className="panel-head">
-        <h2>⑤ AI 점검 보고서</h2>
+    <section className="card report">
+      <header className="card-head">
+        <h2>오늘의 점검 보고서</h2>
         <span className="muted">
           {model || "무료 LLM (로컬 Ollama 또는 Gemini)"}
           {state !== "idle" && ` · ${elapsed.toFixed(1)}초`}
         </span>
       </header>
       <button className="btn primary" onClick={generate} disabled={state === "streaming"}>
-        {state === "streaming" ? "작성 중…" : state === "idle" ? "지금 상태로 보고서 작성" : "다시 작성"}
+        {state === "streaming" ? "작성 중…" : state === "idle" ? "지금 상태로 보고서 만들기" : "다시 만들기"}
       </button>
       <div className={`report-body ${state === "error" ? "error" : ""}`}>
-        {text ? renderMarkdown(text) : state === "idle" && <p className="muted">현재 관제 데이터를 무료 LLM에 넘겨 유지보수 보고서를 받습니다.</p>}
+        {text ? renderMarkdown(text) : state === "idle" && <p className="muted">가로등 상태, 어린이보호구역 기록, 에너지 절약, 내일 태양광 예보를 모아 AI가 담당자용 보고서를 써 줘요.</p>}
         {state === "streaming" && <span className="cursor" />}
       </div>
     </section>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SitingInput, SitingResult } from "@/app/api/siting/route";
+import Icon from "@/components/Icon";
 import { renderMarkdown } from "@/components/ReportPanel";
 import { JIMOK_LIST, LEVEL_LABEL, TARGET_LABEL, ZONE_LIST, assess, type Distances, type Setback } from "@/lib/siting";
 
@@ -109,20 +110,28 @@ export default function SitingPage() {
   const land = data?.land;
 
   return (
-    <main className="siting">
-      <header className="top">
-        <div>
-          <h1>태양광 입지 분석</h1>
-          <p className="muted">주소로 지목·용도지역을 확인하고 관할 지자체 조례를 적용해 설치 가능성을 검토합니다</p>
-        </div>
-        <Link className="btn small" href="/">
-          ← 가로등 관제
+    <main className="siting page">
+      <header className="page-bar">
+        <Link className="brand" href="/">
+          <span className="brand-mark" aria-hidden>
+            <Icon name="lamp" size={18} />
+          </span>
+          <span className="brand-name">
+            DAMO<small>안심 가로등</small>
+          </span>
+        </Link>
+        <Link className="btn small" href="/#report">
+          관제 화면으로
         </Link>
       </header>
+      <div className="page-title">
+        <h1>태양광 설치 검토</h1>
+        <p>주소를 넣으면 땅의 종류(지목)와 용도지역을 확인하고, 그 지역 조례를 적용해 태양광을 설치할 수 있는지 알려 줘요.</p>
+      </div>
 
-      <section className="panel">
-        <header className="panel-head">
-          <h2>① 부지 입력</h2>
+      <section className="card">
+        <header className="card-head">
+          <h2>설치할 땅</h2>
           <div className="tabs" role="tablist">
             <button role="tab" aria-selected={mode === "auto"} className={mode === "auto" ? "on" : ""} disabled={hasKey === false} onClick={() => setMode("auto")}>
               주소로 자동 조회
@@ -134,7 +143,7 @@ export default function SitingPage() {
         </header>
         {hasKey === false && (
           <p className="muted">
-            브이월드 인증키(VWORLD_KEY)가 없어 직접 입력만 됩니다. 토지이용계획확인서(토지이음)를 보고 지목·용도지역을 고르세요. 조례는 주소의 시·군·구로 자동 조회합니다.
+            지금은 주소 자동 조회가 꺼져 있어요. 토지이음(eum.go.kr)의 토지이용계획확인서를 보고 땅 종류와 용도지역을 골라 주세요. 지자체 조례는 주소로 자동으로 찾아요.
           </p>
         )}
         <form
@@ -154,7 +163,7 @@ export default function SitingPage() {
           {mode === "manual" && (
             <>
               <label>
-                지목
+                지목 (땅 종류)
                 <select className="input" value={jimok} onChange={(e) => setJimok(e.target.value)}>
                   {JIMOK_LIST.map((j) => (
                     <option key={j}>{j}</option>
@@ -172,7 +181,7 @@ export default function SitingPage() {
             </>
           )}
           <button className="btn primary" disabled={state === "loading" || !address.trim()}>
-            {state === "loading" ? "조회 중…" : "분석"}
+            {state === "loading" ? "확인 중…" : "설치 가능성 확인"}
           </button>
         </form>
         {mode === "manual" && (
@@ -194,9 +203,9 @@ export default function SitingPage() {
 
       {data && land && result && (
         <div className="siting-grid">
-          <section className="panel">
-            <header className="panel-head">
-              <h2>② 토지 정보</h2>
+          <section className="card">
+            <header className="card-head">
+              <h2>땅 정보</h2>
               <span className="muted">{land.source === "vworld" ? "브이월드 토지이용계획·토지특성" : "직접 입력"}</span>
             </header>
             <table className="kv">
@@ -213,9 +222,9 @@ export default function SitingPage() {
             </table>
           </section>
 
-          <section className="panel">
-            <header className="panel-head">
-              <h2>③ 종합 판정</h2>
+          <section className="card">
+            <header className="card-head">
+              <h2>설치 가능성</h2>
               <span className={`level ${result.level}`}>{LEVEL_LABEL[result.level]}</span>
             </header>
             <ul className="findings">
@@ -230,7 +239,7 @@ export default function SitingPage() {
                 </li>
               ))}
             </ul>
-            <p className="muted">가장 엄격한 항목이 종합 판정이 됩니다. 사전 검토용이며 인허가 결과를 보장하지 않습니다.</p>
+            <p className="muted">가장 까다로운 항목 기준으로 판정해요. 사전 검토용이라 실제 허가 결과와 다를 수 있어요.</p>
             <h3>필요 인허가</h3>
             <ol className="permits">
               {result.permits.map((p) => (
@@ -239,9 +248,9 @@ export default function SitingPage() {
             </ol>
           </section>
 
-          <section className="panel wide">
-            <header className="panel-head">
-              <h2>④ 조례 이격 기준</h2>
+          <section className="card wide">
+            <header className="card-head">
+              <h2>지자체 조례 거리 기준</h2>
               <span className="muted">조례 조문에서 자동 추출 · 대상별 가장 엄격한 기준과 비교 · 거리를 넣으면 판정에 반영</span>
             </header>
             {targets.length === 0 && data.slopes.length === 0 ? (
@@ -306,9 +315,9 @@ export default function SitingPage() {
             )}
           </section>
 
-          <section className="panel wide">
-            <header className="panel-head">
-              <h2>⑤ 적용 조례</h2>
+          <section className="card wide">
+            <header className="card-head">
+              <h2>적용한 조례</h2>
               <span className="muted">법제처 국가법령정보 · 태양광·발전시설 조문 {data.articles.length}개</span>
             </header>
             {data.warnings.map((w) => (
@@ -332,9 +341,9 @@ export default function SitingPage() {
             ))}
           </section>
 
-          <section className="panel wide report">
-            <header className="panel-head">
-              <h2>⑥ AI 검토 의견</h2>
+          <section className="card wide report">
+            <header className="card-head">
+              <h2>AI 검토 의견</h2>
               <span className="muted">{model || "무료 LLM (로컬 Ollama 또는 Gemini)"}</span>
             </header>
             <button className="btn primary" onClick={writeReport} disabled={reportState === "streaming"}>

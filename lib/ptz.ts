@@ -14,16 +14,21 @@ export type Ptz = {
 
 const SIZE = { width: 640, height: 480 };
 
-export async function openCamera(): Promise<{ stream: MediaStream; ptz: Ptz | null }> {
+// user = 앞면(노트북 웹캠·셀카), environment = 휴대폰 뒷면 카메라(도로를 비출 때)
+export type Facing = "user" | "environment";
+
+export async function openCamera(facing: Facing = "user"): Promise<{ stream: MediaStream; ptz: Ptz | null }> {
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error("이 브라우저는 카메라를 지원하지 않아요. https 주소로 접속했는지 확인하세요.");
+  const video = { ...SIZE, facingMode: { ideal: facing } };
   let stream: MediaStream;
   try {
     // pan/tilt/zoom 을 요청해야 크롬이 카메라 각도 제어 권한을 함께 묻는다
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { ...SIZE, pan: true, tilt: true, zoom: true } as MediaTrackConstraints,
+      video: { ...video, pan: true, tilt: true, zoom: true } as MediaTrackConstraints,
     });
   } catch (e) {
     if (e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError")) throw e;
-    stream = await navigator.mediaDevices.getUserMedia({ video: SIZE });
+    stream = await navigator.mediaDevices.getUserMedia({ video });
   }
   const track = stream.getVideoTracks()[0];
   const caps = (track.getCapabilities?.() ?? {}) as PtzCaps;

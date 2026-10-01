@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import Icon from "@/components/Icon";
 import { LABELS, createEngine, type Engine } from "@/lib/detectors";
 import { GestureController, createHandEngine, type HandEngine, type Mode, type Point, type View } from "@/lib/gesture";
-import { openCamera, type Ptz } from "@/lib/ptz";
+import { openCamera, type Facing, type Ptz } from "@/lib/ptz";
 import { CAM_HOME_POS, MAP_W, zoneFor } from "@/lib/sim";
 import { Tracker, isMoving, predict, type Detection, type Track } from "@/lib/tracker";
 
@@ -12,31 +13,43 @@ export const FRAME_WIDTH_M = 3;
 export const speedKmh = (t: Track) => Math.abs(t.vx) * FRAME_WIDTH_M * 3.6;
 
 export type CameraFrame = { active: Track[]; born: Track[]; lost: Track[]; now: number };
+export type CameraStatus = "off" | "loading" | "running" | "error";
 type Props = {
   onFrame: (f: CameraFrame) => void;
   onView?: (v: View) => void; // 손동작으로 바뀐 카메라 시점 (지도 위 카메라 구간 위치)
+  onStatus?: (s: CameraStatus) => void;
+  tools?: ReactNode; // 창 크기 버튼 등 카메라 창이 붙이는 버튼
+  privacy?: boolean; // 얼굴·번호판 부분 모자이크
+  compact?: boolean; // 작은 창: 카메라 전환·끄기 버튼은 숨기고 창 버튼만
 };
 
 // 처음 자리: 지도의 원래 카메라 구간
 const HOME: View = { x: CAM_HOME_POS, y: 0, zoom: 1 };
 
 const MODE_TEXT: Record<Mode, string> = {
-  none: "손을 카메라에 보여 주세요",
-  follow: "🖐 손 따라 이동 중",
-  stop: "✊ 정지",
+  none: "손을 보여 주면 카메라 구간을 옮길 수 있어요",
+  follow: "🖐 손을 따라 이동 중",
+  stop: "✊ 멈춤",
   "reset-hold": "✌️ 원래 자리로…",
 };
 
+// 마우스가 있는 기기(노트북)는 바로 켜고 앞면 카메라·손동작을 쓴다.
+// 휴대폰은 권한 창이 갑자기 뜨지 않게 버튼으로 켜고, 도로를 비추도록 뒷면 카메라를 쓴다.
+const isDesktop = () => typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches;
+
 const sameView = (a: View, b: View) => a.x === b.x && a.y === b.y && a.zoom === b.zoom;
 
-export default function CameraPanel({ onFrame, onView }: Props) {
+export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy = true, compact }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const trackerRef = useRef(new Tracker());
   const onFrameRef = useRef(onFrame);
   const onViewRef = useRef(onView);
-  const [status, setStatus] = useState<"loading" | "running" | "error">("loading");
+  const [status, setStatus] = useState<CameraStatus>("off");
+  const [facing, setFacing] = useState<Facing>("user");
+  const facingRef = useRef<Facing>("user");
+  const [help, setHelp] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
   const [error, setError] = useState("");
   const [fps, setFps] = useState(0);
@@ -58,6 +71,11 @@ export default function CameraPanel({ onFrame, onView }: Props) {
 
   onFrameRef.current = onFrame;
   onViewRef.current = onView;
+  const privacyRef = useRef(privacy);
+  privacyRef.current = privacy;
+  const mirror = facing === "user"; // 앞면 카메라만 거울처럼 보여 준다
+
+  useEffect(() => onStatus?.(status), [status, onStatus]);
 
   useEffect(() => {
     if (!toast) return;
@@ -70,18 +88,39 @@ export default function CameraPanel({ onFrame, onView }: Props) {
     onViewRef.current?.(view);
   }, [view]);
 
-  // 클릭 없이 바로 켠다 (브라우저의 카메라 권한 요청만 한 번 뜬다)
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    void start();
+    const desktop = isDesktop();
+    const f: Facing = desktop ? "user" : "environment";
+    facingRef.current = f;
+    setFacing(f);
+    if (desktop) void start(f);
   }, []);
 
-  async function start() {
+  function stopStream() {
+    (videoRef.current?.srcObject as MediaStream | null)?.getTracks().forEach((t) => t.stop());
+    if (videoRef.current) videoRef.current.srcObject = null;
+  }
+
+  function stop() {
+    stopStream();
+    setStatus("off");
+  }
+
+  function flip() {
+    const f: Facing = facingRef.current === "user" ? "environment" : "user";
+    facingRef.current = f;
+    setFacing(f);
+    void start(f);
+  }
+
+  async function start(f: Facing = facingRef.current) {
+    stopStream();
     setStatus("loading");
     setLoadingMsg("카메라 연결 중…");
     try {
-      const { stream, ptz } = await openCamera();
+      const { stream, ptz } = await openCamera(f);
       const video = videoRef.current!;
       video.srcObject = stream;
       await video.play();
@@ -94,7 +133,8 @@ export default function CameraPanel({ onFrame, onView }: Props) {
         engineRef.current = engine;
         setEngineInfo({ label: engine.label, skipped });
       }
-      if (!handRef.current && handStatus !== "unavailable") {
+      // 손동작은 노트북 앞면 카메라 시연용. 휴대폰·뒷면 카메라에서는 불러오지 않아 배터리를 아낀다
+      if (!handRef.current && handStatus !== "unavailable" && f === "user" && isDesktop()) {
         setLoadingMsg("손동작 AI 모델 불러오는 중…");
         try {
           handRef.current = await createHandEngine();
@@ -139,23 +179,24 @@ export default function CameraPanel({ onFrame, onView }: Props) {
         const H = video.videoHeight;
         const raw = await engine.detect(video, now);
         if (stopped) return;
-        // 화면을 거울처럼 보여 주므로 x를 뒤집어 저장한다
+        // 앞면 카메라는 화면을 거울처럼 보여 주므로 x를 뒤집어 저장한다
+        const flipX = facingRef.current === "user";
         const dets: Detection[] = raw.map((d) => ({
           label: LABELS[d.name] ?? d.name,
           score: d.score,
-          x: (W - d.x - d.w) / W,
+          x: flipX ? (W - d.x - d.w) / W : d.x / W,
           y: d.y / H,
           w: d.w / W,
           h: d.h / H,
         }));
         const frame = trackerRef.current.update(dets, now);
         onFrameRef.current({ ...frame, now });
-        draw(canvas, W, H, frame.active);
+        draw(canvas, W, H, frame.active, privacyRef.current ? { video, flipX } : null);
 
         // 인식은 항상 전체 프레임에서 하므로 디지털 확대 중에도 화면 밖의 손을 알아본다
         const hand = handRef.current;
         const control = controlRef.current;
-        if (hand && control) {
+        if (hand && control && flipX) {
           const handFrame = await hand.detect(video, now);
           if (stopped) return;
           const step = control.update(handFrame, now, viewRef.current);
@@ -195,23 +236,15 @@ export default function CameraPanel({ onFrame, onView }: Props) {
     };
   }, []);
 
+  const gestures = status === "running" && handStatus === "ready" && mirror;
   return (
-    <section className="panel">
-      <header className="panel-head">
-        <h2>① 가로등 카메라 (웹캠)</h2>
-        {status === "running" && (
-          <span className="muted">
-            브라우저 내 AI 추론 · {engineInfo.label}
-            {handLabel && ` · 손 인식 ${handLabel}`} · {fps} fps
-          </span>
-        )}
-      </header>
-      <div className="camera">
+    <div className="cam">
+      <div className={`cam-stage-wrap${mirror ? " mirror" : ""}`}>
         <div className="camera-stage" style={{ transform: stageTransform(view, ptz) }}>
           <video ref={videoRef} muted playsInline />
           <canvas ref={canvasRef} />
         </div>
-        {status === "running" && handStatus === "ready" && (
+        {gestures && (
           <>
             <span className={`camera-hud${mode === "none" ? "" : " on"}`}>{MODE_TEXT[mode]}</span>
             <canvas ref={miniRef} className="camera-mini" width={96} height={72} aria-hidden />
@@ -224,50 +257,101 @@ export default function CameraPanel({ onFrame, onView }: Props) {
         )}
         {status !== "running" && (
           <div className="camera-overlay">
-            {status === "loading" && <p>{loadingMsg}</p>}
+            {status === "off" && (
+              <>
+                <Icon name="camera" size={32} />
+                <p>현장 카메라를 켜면 AI가 사람과 차를 알아봐요</p>
+                <button className="btn primary" onClick={() => start()}>
+                  카메라 켜기
+                </button>
+                <p className="hint">{facing === "environment" ? "휴대폰 뒷면 카메라로 도로를 비춰 주세요" : "노트북 웹캠 앞을 지나가 보세요"}</p>
+              </>
+            )}
+            {status === "loading" && (
+              <>
+                <span className="spinner" aria-hidden />
+                <p>{loadingMsg}</p>
+              </>
+            )}
             {status === "error" && (
               <>
-                <p>카메라를 시작하지 못했습니다: {error}</p>
-                <p>주소창 왼쪽의 카메라 아이콘에서 권한을 허용한 뒤 다시 시도하세요.</p>
-                <button className="btn" onClick={start}>
+                <p>카메라를 켜지 못했어요</p>
+                <p className="hint">{error}</p>
+                <p className="hint">주소창 옆 카메라 아이콘에서 권한을 허용한 뒤 다시 시도하세요.</p>
+                <button className="btn primary" onClick={() => start()}>
                   다시 시도
                 </button>
               </>
             )}
           </div>
         )}
+        {help && gestures && (
+          <div className="camera-help" onClick={() => setHelp(false)}>
+            <p><b>🖐 손 펴고 좌우로</b> 지도의 카메라 구간이 손을 따라가요{ptz ? " (카메라도 실제로 회전)" : ""}</p>
+            <p><b>✊ 주먹</b> 그 자리에 멈춰요</p>
+            <p><b>✌️ 1초 유지</b> 원래 자리로 돌아가요</p>
+          </div>
+        )}
       </div>
-      {status === "running" && handStatus === "ready" && (
-        <ul className="camera-guide">
-          <li>
-            <b>🖐 손 펴고 좌우로 움직이기</b> 지도의 카메라 구간이 손을 실시간으로 따라 이동{ptz ? " (카메라도 실제로 회전)" : ""}
-          </li>
-          <li>
-            <b>✊ 주먹 쥐기</b> 그 자리에서 정지. 다시 펴면 그 자리부터 이어서 이동
-          </li>
-          <li>
-            <b>✌️ 1초 유지</b> 원래 자리
-          </li>
-        </ul>
-      )}
-      {status === "running" && handStatus === "unavailable" && (
-        <p className="muted">이 브라우저에서는 손동작 AI를 불러오지 못했습니다.</p>
-      )}
-      {status === "running" && (
-        <p className="muted">
-          카메라 앞을 좌우로 걸어 보세요. 가는 방향의 가로등이 먼저 켜집니다.
-          {engineInfo.skipped.length > 0 && ` (GPU를 쓸 수 없어 CPU 엔진으로 실행 중. 크롬 설정에서 "그래픽 가속 사용"을 켜면 더 빨라집니다.)`}
-        </p>
-      )}
-    </section>
+      <div className="cam-bar">
+        <span className={`cam-live${status === "running" ? " on" : ""}`}>
+          {status === "running" ? (compact ? "AI 분석 중" : `AI 분석 중 · ${fps}fps`) : status === "loading" ? "연결 중" : "꺼짐"}
+        </span>
+        {status === "running" && engineInfo.label && <span className="cam-engine">{engineInfo.label}</span>}
+        <span className="cam-spacer" />
+        {gestures && !compact && (
+          <button className="icon-btn" onClick={() => setHelp((h) => !h)} aria-label="손동작 도움말" title="손동작 도움말">
+            <Icon name="info" size={18} />
+          </button>
+        )}
+        {!compact && (
+          <button className="icon-btn" onClick={flip} aria-label="앞·뒤 카메라 바꾸기" title="앞·뒤 카메라 바꾸기">
+            <Icon name="flip" size={18} />
+          </button>
+        )}
+        {status !== "off" && !compact && (
+          <button className="icon-btn" onClick={stop} aria-label="카메라 끄기" title="카메라 끄기">
+            <Icon name="cameraOff" size={18} />
+          </button>
+        )}
+        {tools}
+      </div>
+    </div>
   );
 }
 
-function draw(canvas: HTMLCanvasElement, W: number, H: number, tracks: Track[]) {
+// 개인정보 가림: 사람은 머리 부분(박스 위쪽 30%), 차는 번호판 높이(아래쪽 30%)를 굵은 모자이크로 덮는다.
+// 원본 영상은 그대로 두고 화면 위에만 겹쳐 그리므로, 영상을 저장·전송하는 장비에서는 같은 처리를 기기에서 해야 한다.
+let mosaic: HTMLCanvasElement | null = null; // 서버 렌더링 때는 document가 없으므로 처음 쓸 때 만든다
+function mask(ctx: CanvasRenderingContext2D, W: number, H: number, t: Track, src: { video: HTMLVideoElement; flipX: boolean }) {
+  const b = t.box;
+  const part = t.kind === "person" ? { y: b.y, h: b.h * 0.3 } : { y: b.y + b.h * 0.7, h: b.h * 0.3 };
+  const dx = b.x * W, dy = part.y * H, dw = b.w * W, dh = part.h * H;
+  if (dw < 2 || dh < 2) return;
+  const sx = src.flipX ? W - dx - dw : dx; // 거울 화면이면 원본에서는 좌우 반대 위치
+  const cols = Math.max(2, Math.round(dw / 14));
+  const rows = Math.max(2, Math.round(dh / 14));
+  mosaic ??= document.createElement("canvas");
+  mosaic.width = cols;
+  mosaic.height = rows;
+  const m = mosaic.getContext("2d")!;
+  m.drawImage(src.video, sx, dy, dw, dh, 0, 0, cols, rows);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  if (src.flipX) {
+    ctx.translate(dx + dw, dy);
+    ctx.scale(-1, 1);
+    ctx.drawImage(mosaic, 0, 0, dw, dh);
+  } else ctx.drawImage(mosaic, dx, dy, dw, dh);
+  ctx.restore();
+}
+
+function draw(canvas: HTMLCanvasElement, W: number, H: number, tracks: Track[], privacy: { video: HTMLVideoElement; flipX: boolean } | null) {
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d")!;
   ctx.clearRect(0, 0, W, H);
+  if (privacy) for (const t of tracks) mask(ctx, W, H, t, privacy);
   ctx.font = "bold 17px system-ui, sans-serif";
   ctx.lineCap = "round";
 
