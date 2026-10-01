@@ -19,7 +19,10 @@ import { BIN_MS } from "@/lib/forecast";
 import type { View } from "@/lib/gesture";
 import { loadModels, resetLamp, scoreLamp, type Models } from "@/lib/ml";
 import { PredictiveLighting, arrival, type MapTarget } from "@/lib/predictive";
+import { ClipRecorder } from "@/lib/clips";
+import { ControlCenterLink, SITE, toOutbound } from "@/lib/integration";
 import { EVENT_LABEL, SchoolZoneMonitor, policyAt, type Sign } from "@/lib/schoolzone";
+import { VMS_IDS, VmsBus } from "@/lib/vms";
 import {
   RATED_WATT,
   ROAD_H_Y,
@@ -126,12 +129,16 @@ export default function Home() {
   const devRef = useRef({
     lamps: new Map<string, { online: boolean; lastAt: number | null; brightness: number; sent: number | null; sentAt: number }>(),
     cams: new Map<string, { online: boolean; times: number[]; lastCount: number }>(),
+    vms: new Map<string, boolean>(),
   });
   const [deviceState, setDeviceState] = useState<DeviceView["state"]>("off");
   const [deviceError, setDeviceError] = useState("");
   const [brokerUrl, setBrokerUrl] = useState("ws://localhost:9001");
   const [method, setMethod] = useState<Method>("rule");
   const zoneRef = useRef(new SchoolZoneMonitor());
+  const recorderRef = useRef<ClipRecorder | null>(null);
+  const ccRef = useRef(new ControlCenterLink());
+  const vmsRef = useRef<VmsBus | null>(null);
   const [tab, setTabState] = useState<Tab>("live");
   const lastSpoken = useRef<Sign["level"]>("idle");
 
@@ -154,8 +161,21 @@ export default function Home() {
   // 랜덤 값이 들어가므로 서버 렌더와 어긋나지 않게 브라우저에서만 만든다.
   useEffect(() => {
     lampsRef.current = createLamps();
-    walkersRef.current = createWalkers();
+    // 교차로 남쪽 횡단보도를 오가는 보행자 한 명을 더 둔다 (우회전 알리미 시연용)
+    walkersRef.current = [...createWalkers(), { road: "v", pos: 420, speed: -0.5, kind: "person" }];
     brainRef.current = new PredictiveLighting(performance.now());
+    recorderRef.current = new ClipRecorder();
+    vmsRef.current = new VmsBus();
+    ccRef.current.start();
+    // 사건이 생기면: 이 화면 카메라의 사건은 영상 저장 → 관제센터 전송 → 현장 MQTT로도 알림
+    const offEvent = zoneRef.current.onEvent((e) => {
+      const clip = e.source === "camera" && !e.device && e.kind !== "crossing";
+      if (clip) recorderRef.current?.trigger(e);
+      ccRef.current.push(e, clip);
+      if (e.kind !== "crossing") linkRef.current?.sendEvent(SITE.id, toOutbound(e, clip));
+    });
+    // 개발 모드 QA용: 브라우저 콘솔에서 가짜 사건을 넣어 영상 저장·연동을 시험한다
+    if (process.env.NODE_ENV === "development") Object.assign(window, { __damo: { zone: zoneRef.current, recorder: recorderRef.current, cc: ccRef.current } });
     setReady(true);
     loadModels()
       .then((m) => {
@@ -163,6 +183,11 @@ export default function Home() {
         setMethod("classifier");
       })
       .catch((e) => console.warn("고장 탐지 모델을 불러오지 못해 규칙만 씁니다.", e));
+    return () => {
+      offEvent();
+      ccRef.current.stop();
+      vmsRef.current?.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -174,6 +199,10 @@ export default function Home() {
       moveWalkers(walkersRef.current);
       const now = performance.now();
       zoneRef.current.onSim(walkersRef.current, now);
+      // 전광판 문구가 바뀌면 화면 전광판(/vms)과 실제 장비(MQTT)로 내보낸다
+      const send = (id: keyof typeof VMS_IDS, sg: Sign) => linkRef.current?.sendSign(VMS_IDS[id], sg);
+      vmsRef.current?.publish("main", zoneRef.current.signAt(now), now, send);
+      vmsRef.current?.publish("rt", zoneRef.current.rtSignAt(now), now, send);
       for (const l of lampsRef.current) {
         const target = targetBrightness(l, walkersRef.current, ctx);
         stepBrightness(l, target);
@@ -223,6 +252,7 @@ export default function Home() {
       for (const l of lampsRef.current) l.source = "sim";
       devRef.current.lamps.clear();
       devRef.current.cams.clear();
+      devRef.current.vms.clear();
       setDeviceState("off");
       return;
     }
@@ -242,6 +272,7 @@ export default function Home() {
         },
         onStatus: (kind, id, online) => {
           if (kind === "lamp") lampEntry(id).online = online;
+          else if (kind === "vms") dev.vms.set(id, online);
           else dev.cams.set(id, { ...(dev.cams.get(id) ?? { times: [], lastCount: 0 }), online });
         },
         onSensor: (id, m) => {
@@ -273,6 +304,7 @@ export default function Home() {
             now,
           );
           brainRef.current?.onFrame({ ...frame, now });
+          zoneRef.current.onCamera({ ...frame, now }, id); // 엣지 카메라도 스쿨존 판단에 쓴다
         },
       });
     } catch (e) {
@@ -282,7 +314,9 @@ export default function Home() {
   }
 
   const zone = zoneRef.current;
-  const sign = ready ? zone.signAt(performance.now()) : { level: "idle" as const, text: "", sub: "" };
+  const idle: Sign = { level: "idle", text: "", sub: "" };
+  const sign = ready ? zone.signAt(performance.now()) : idle;
+  const rtSign = ready ? zone.rtSignAt(performance.now()) : idle;
 
   // 위험 문구가 새로 뜰 때만 음성으로 한 번 읽는다
   useEffect(() => {
@@ -364,6 +398,8 @@ export default function Home() {
       counts: zone.counts,
       slowRate: zone.slowRate(),
       warned: zone.warned,
+      rtRate: zone.rtRate(),
+      rtWarned: zone.rtWarned,
       recent: zone.events.filter((e) => e.kind !== "crossing").slice(0, 8).map((e) => `${EVENT_LABEL[e.kind]}: ${e.text}`),
     },
     solar: solarRef.current,
@@ -387,6 +423,7 @@ export default function Home() {
       targets={view.targets}
       alert={mapAlert}
       sign={sign}
+      rtSign={rtSign}
       limit={policy.limit}
       compact={compact}
     />
@@ -536,7 +573,17 @@ export default function Home() {
           )}
 
           {tab === "school" && (
-            <SchoolZonePanel zone={zone} sign={sign} onChange={() => force((n) => n + 1)} map={map()} />
+            <SchoolZonePanel
+              zone={zone}
+              sign={sign}
+              rtSign={rtSign}
+              onChange={() => force((n) => n + 1)}
+              map={map()}
+              recorder={recorderRef.current!}
+              link={ccRef.current}
+              vmsDevices={[...devRef.current.vms.entries()].map(([id, online]) => ({ id, online }))}
+              mqttOn={deviceState === "connected"}
+            />
           )}
 
           {tab === "facility" && (
@@ -669,6 +716,7 @@ export default function Home() {
         onShowMap={() => setTab("live")}
         inset={map(true)}
         privacy={zone.settings.privacy}
+        recorder={recorderRef.current ?? undefined}
         alert={sign.level === "danger" || sign.level === "slow" ? `${sign.text} · ${sign.sub}` : null}
       />
     </div>
