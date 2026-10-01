@@ -1,7 +1,7 @@
 // 무료 LLM에 프롬프트를 보내고 본문 텍스트만 스트리밍으로 돌려준다. 서버에서만 쓴다.
 // GEMINI_API_KEY가 있으면 Google Gemini 무료 API(배포 서버용), 없으면 로컬 Ollama(노트북용)를 쓴다.
 
-const GEMINI_KEY = process.env.GEMINI_API_KEY ?? "";
+const GEMINI_KEY = (process.env.GEMINI_API_KEY ?? "").trim(); // 붙여 넣을 때 섞인 줄바꿈·공백 제거
 // "-latest" 별칭은 Google이 최신 Flash 모델로 바꿔 가리키므로 모델이 은퇴해도 코드를 고칠 필요가 없다
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-flash-latest";
 // 무료 API는 사용량이 몰리면 503·429를 돌려준다. 그때는 가벼운 모델로 한 번 더 시도한다.
@@ -15,8 +15,20 @@ export const MODEL = GEMINI_KEY ? GEMINI_MODEL : OLLAMA_MODEL;
 
 type Options = { temperature?: number; num_ctx?: number };
 
+// 배포 서버(Vercel)에는 Ollama가 없다. 키가 없으면 localhost로 헛되이 연결하지 않고 바로 원인을 알려 준다.
+const ON_SERVER = !!process.env.VERCEL;
+
+export function llmStatus() {
+  return { provider: PROVIDER, model: MODEL, geminiKey: GEMINI_KEY !== "", hosted: ON_SERVER };
+}
+
 export function streamChat(prompt: string, options: Options = {}): Promise<Response> {
-  return GEMINI_KEY ? streamGemini(prompt, options) : streamOllama(prompt, options);
+  if (GEMINI_KEY) return streamGemini(prompt, options);
+  if (ON_SERVER)
+    return Promise.resolve(
+      new Response("배포 서버에 AI 키(GEMINI_API_KEY)가 설정되지 않았어요. Vercel 프로젝트 환경변수에 키를 넣고 다시 배포하세요.", { status: 503 }),
+    );
+  return streamOllama(prompt, options);
 }
 
 const headers = { "Content-Type": "text/plain; charset=utf-8", "X-Model": MODEL, "X-Provider": PROVIDER };
