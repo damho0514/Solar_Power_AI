@@ -10,7 +10,7 @@ export type HandTarget = "map" | "camera";
 export type HandStatus = "off" | "ready" | "unavailable";
 // road: 지금 보이는 3D 뷰어가 로드뷰인지 (안내 문구를 걷기·둘러보기로 바꾼다)
 // reason: 손 인식을 쓸 수 없을 때 그 이유
-// macro: 지금 진행 중인 스냅 매크로 (뷰어가 대상을 따라가는 중). missing = 대상이 안 보여 못 감
+// macro: 지금 진행 중인 이동 매크로 (뷰어가 대상을 따라가는 중). missing = 대상이 안 보여 못 감
 export type MacroState = { n: 1 | 2 | 3; label: string; missing?: boolean } | null;
 type State = { target: HandTarget; status: HandStatus; road: boolean; reason: string; macro: MacroState };
 
@@ -54,7 +54,7 @@ export const handBus = {
   setMacro(macro: MacroState) {
     if (macro?.n !== state.macro?.n || macro?.missing !== state.macro?.missing) set({ macro });
   },
-  // 화면 버튼으로 매크로 실행: 스냅과 똑같은 명령을 흘려보낸다
+  // 화면 버튼·숫자 키로 매크로 실행: 손동작 명령과 같은 길로 흘려보낸다
   runMacro(n: 1 | 2 | 3) {
     const step: MapStep = { actions: [{ kind: "macro", n }], mode: "none", cursors: [], hold: null, now: performance.now() };
     stepListeners.forEach((f) => f(step));

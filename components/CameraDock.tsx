@@ -4,12 +4,14 @@
 // - 창 모드: 손가락이나 마우스로 끌어 옮기고, 놓으면 가까운 모서리에 붙는다. 영상을 톡 누르면 전체 화면.
 // - 전체 화면: 카메라를 크게 보고, 구석의 작은 지도를 누르면 지도 화면으로 돌아간다.
 // - 최소화: 작은 동그라미만 남긴다. 카메라와 AI 분석은 계속 돈다.
+// - 자리 붙이기: 모니터링 화면처럼 웹캠 칸(lib/dockSlot)이 있으면 그 칸 위에 정확히 겹쳐 붙는다.
 // 카메라(<video>)는 모드가 바뀌어도 다시 만들지 않는다. 위치·모양만 CSS로 바꾼다.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import CameraPanel, { type CameraFrame, type CameraStatus } from "@/components/CameraPanel";
 import Icon from "@/components/Icon";
 import type { ClipRecorder } from "@/lib/clips";
+import { useDockSlot } from "@/lib/dockSlot";
 import type { View } from "@/lib/gesture";
 
 type Mode = "pip" | "full" | "min";
@@ -23,6 +25,7 @@ type Props = {
   alert?: string | null; // 스쿨존 경고처럼 창 위에 띄울 한 줄
   privacy?: boolean;
   recorder?: ClipRecorder;
+  onCamStatus?: (s: CameraStatus) => void; // 모니터링 기록에 "웹캠 켜짐"을 남기려고
 };
 
 const MARGIN = 12;
@@ -36,13 +39,32 @@ function load(): { mode: Mode; corner: Corner } {
   return { mode: "pip", corner: "br" };
 }
 
-export default function CameraDock({ onFrame, onView, inset, onShowMap, alert, privacy, recorder }: Props) {
+export default function CameraDock({ onFrame, onView, inset, onShowMap, alert, privacy, recorder, onCamStatus }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<Mode>("pip");
   const [corner, setCorner] = useState<Corner>("br");
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const [status, setStatus] = useState<CameraStatus>("off");
   const start = useRef<{ px: number; py: number; x: number; y: number; moved: boolean } | null>(null);
+  const slot = useDockSlot();
+  const slotted = !!slot && mode !== "full";
+
+  // 자리에 붙은 동안은 매 프레임 그 칸의 위치·크기를 따라간다 (스크롤·창 크기 변경에도)
+  useEffect(() => {
+    if (!slotted || !slot) return;
+    const el = ref.current!;
+    let raf = 0;
+    const follow = () => {
+      const r = slot.getBoundingClientRect();
+      Object.assign(el.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px`, right: "auto", bottom: "auto" });
+      raf = requestAnimationFrame(follow);
+    };
+    follow();
+    return () => {
+      cancelAnimationFrame(raf);
+      for (const k of ["left", "top", "width", "height", "right", "bottom"] as const) el.style[k] = "";
+    };
+  }, [slotted, slot]);
 
   useLayoutEffect(() => {
     const v = load();
@@ -70,10 +92,15 @@ export default function CameraDock({ onFrame, onView, inset, onShowMap, alert, p
     };
   }, [mode]);
 
-  const onStatus = useCallback((s: CameraStatus) => setStatus(s), []);
+  const camStatusRef = useRef(onCamStatus);
+  camStatusRef.current = onCamStatus;
+  const onStatus = useCallback((s: CameraStatus) => {
+    setStatus(s);
+    camStatusRef.current?.(s);
+  }, []);
 
   function onPointerDown(e: React.PointerEvent) {
-    if (mode === "full" || (e.target as HTMLElement).closest("button, a, input")) return;
+    if (mode === "full" || slotted || (e.target as HTMLElement).closest("button, a, input")) return;
     const r = ref.current!.getBoundingClientRect();
     start.current = { px: e.clientX, py: e.clientY, x: r.left, y: r.top, moved: false };
     ref.current!.setPointerCapture(e.pointerId);
@@ -95,6 +122,7 @@ export default function CameraDock({ onFrame, onView, inset, onShowMap, alert, p
     if (!s) return;
     if (!s.moved) {
       // 톡 누르기: 최소화 상태면 펼치고, 창 모드에서 켜진 카메라면 전체 화면
+      if (slotted) return;
       if (mode === "min") setMode("pip");
       else if (status === "running") setMode("full");
       return;
@@ -114,7 +142,7 @@ export default function CameraDock({ onFrame, onView, inset, onShowMap, alert, p
       {mode === "full" && <div className="dock-backdrop" />}
       <div
         ref={ref}
-        className={`dock dock-${mode} dock-${corner}${drag ? " dragging" : ""}`}
+        className={slotted ? "dock dock-slot" : `dock dock-${mode} dock-${corner}${drag ? " dragging" : ""}`}
         style={style}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -126,17 +154,17 @@ export default function CameraDock({ onFrame, onView, inset, onShowMap, alert, p
         role="region"
         aria-label="현장 카메라 창"
       >
-        {alert && mode !== "min" && <div className="dock-alert">{alert}</div>}
+        {alert && (mode !== "min" || slotted) && <div className="dock-alert">{alert}</div>}
         <CameraPanel
           onFrame={onFrame}
           onView={onView}
           onStatus={onStatus}
           privacy={privacy}
-          compact={mode !== "full"}
+          compact={mode !== "full" && !slotted}
           recorder={recorder}
           tools={
             <>
-              {mode === "full" ? (
+              {slotted ? null : mode === "full" ? (
                 <button className="icon-btn" onClick={() => setMode("pip")} aria-label="작은 창으로" title="작은 창으로">
                   <Icon name="shrink" size={18} />
                 </button>
@@ -153,7 +181,7 @@ export default function CameraDock({ onFrame, onView, inset, onShowMap, alert, p
             </>
           }
         />
-        {mode === "min" && (
+        {mode === "min" && !slotted && (
           <div className="dock-bubble" aria-label="카메라 창 펼치기">
             <Icon name="camera" size={22} />
             {status === "running" && <i className="live-dot" />}
