@@ -1,0 +1,21 @@
+# MQTT 토픽 권한. 계정 이름 = 기기 이름 (가로등 L-05, 카메라 cam-1, 전광판 vms-zone).
+# 밝기 명령과 전광판 문구는 관제 화면(dashboard)만 보낼 수 있다.
+
+user dashboard
+topic read streetlight/#
+topic write streetlight/+/command
+topic write streetlight/vms/+/set
+topic write streetlight/zone/+/event
+
+# 가로등: 자기 측정값·상태만 쓰고, 자기 밝기 명령만 받는다
+pattern write streetlight/%u/sensor
+pattern write streetlight/%u/status
+pattern read streetlight/%u/command
+
+# 엣지 카메라: 자기 인식 결과·상태만 쓴다
+pattern write streetlight/camera/%u/detections
+pattern write streetlight/camera/%u/status
+
+# 전광판: 자기 문구만 받고 자기 상태만 쓴다
+pattern read streetlight/vms/%u/set
+pattern write streetlight/vms/%u/status

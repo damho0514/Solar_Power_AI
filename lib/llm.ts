@@ -22,7 +22,11 @@ export function llmStatus() {
   return { provider: PROVIDER, model: MODEL, geminiKey: GEMINI_KEY !== "", hosted: ON_SERVER };
 }
 
+// 입력 정리를 거쳐도 프롬프트가 이보다 크면 받지 않는다 (무료 할당량 보호)
+const MAX_PROMPT = 40_000;
+
 export function streamChat(prompt: string, options: Options = {}): Promise<Response> {
+  if (prompt.length > MAX_PROMPT) return Promise.resolve(new Response("자료가 너무 많아 보고서를 만들 수 없어요.", { status: 413 }));
   if (GEMINI_KEY) return streamGemini(prompt, options);
   if (ON_SERVER)
     return Promise.resolve(
@@ -76,9 +80,10 @@ async function streamGemini(prompt: string, options: Options): Promise<Response>
   }
   if (!upstream) return new Response("Gemini API에 연결할 수 없습니다.", { status: 503 });
   if (!upstream.ok || !upstream.body) {
-    const msg = await upstream.text();
-    const hint = RETRYABLE.has(upstream.status) ? "\n무료 API 사용량이 몰렸거나 한도를 넘었습니다. 잠시 뒤 다시 시도하세요." : "";
-    return new Response(`Gemini 오류 (${upstream.status}): ${msg}${hint}`, { status: 502 });
+    // 원문 오류에는 GCP 프로젝트·할당량 정보가 들어 있어 서버 로그에만 남긴다
+    console.error(`[llm] Gemini ${upstream.status}`, await upstream.text().catch(() => ""));
+    const hint = RETRYABLE.has(upstream.status) ? " 무료 API 사용량이 몰렸거나 한도를 넘었습니다. 잠시 뒤 다시 시도하세요." : "";
+    return new Response(`AI 응답을 받지 못했어요 (Gemini ${upstream.status}).${hint}`, { status: 502 });
   }
 
   // SSE: "data: {...}" 줄마다 candidates[0].content.parts[].text

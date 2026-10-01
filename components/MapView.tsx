@@ -5,6 +5,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useState, type ComponentProps } from "react";
+import GestureHud from "@/components/GestureHud";
 import StreetMap from "@/components/StreetMap";
 import type { Preset } from "@/components/Street3D";
 import type { MapTarget } from "@/lib/predictive";
@@ -102,7 +103,10 @@ export default function MapView({ view, ...props }: Props) {
           view={view}
         />
       ) : mode === "2d" ? (
-        <StreetMap {...props} />
+        <>
+          <StreetMap {...props} />
+          {!props.compact && <GestureHud />}
+        </>
       ) : (
         <div className="street3d loading3d" />
       )}

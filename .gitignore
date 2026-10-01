@@ -11,3 +11,5 @@ device/.venv
 .vercel
 .env*
 !.env.example
+device/passwd
+device/certs/

@@ -1,6 +1,7 @@
 // 무료 LLM(로컬 Ollama 또는 Gemini)에 관제 데이터를 넘겨 점검 보고서를 받아 스트리밍한다.
 
 import { streamChat } from "@/lib/llm";
+import { DATA_RULE, fail, guardJson } from "@/lib/server/guard";
 
 type ReportInput = {
   total: number;
@@ -85,7 +86,9 @@ function buildPrompt(d: ReportInput) {
 
   return `당신은 지자체 스마트 가로등 관제센터의 유지보수 담당자입니다.
 아래 데이터만 근거로 오늘의 점검 보고서를 한국어로 작성하세요. 데이터에 없는 사실은 지어내지 마세요.
+${DATA_RULE}
 
+<자료>
 [운영 현황]
 - 관리 가로등: ${d.total}개
 - 상황 인지형 디밍 절감률: ${d.savingPct.toFixed(1)}% (절감 전력 ${d.savedWh.toFixed(0)}Wh)
@@ -101,6 +104,7 @@ ${solar}
 
 [이상 징후 가로등 · 판정 방법: ${d.method}]
 ${lamps}
+</자료>
 
 [형식]
 ## 요약
@@ -117,7 +121,17 @@ ${lamps}
 한두 문장.`;
 }
 
+// 화면 하나가 보내는 자료는 수 KB다. 넉넉히 잡고, 문자열·배열은 잘라서 프롬프트가 커지지 않게 한다
+const LIMITS = { maxStr: 300, maxArr: 60, maxDepth: 6, maxKeys: 40 };
+
 export async function POST(req: Request) {
-  const data = (await req.json()) as ReportInput;
-  return streamChat(buildPrompt(data));
+  const g = await guardJson(req, { name: "report", limit: 6, maxBytes: 64_000, clamp: LIMITS });
+  if (!g.ok) return g.res;
+  let prompt: string;
+  try {
+    prompt = buildPrompt(g.body as ReportInput);
+  } catch (e) {
+    return fail(400, "보고서 자료 형식이 맞지 않아요", e);
+  }
+  return streamChat(prompt);
 }

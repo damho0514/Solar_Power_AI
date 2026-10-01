@@ -15,10 +15,9 @@
 """
 
 import argparse
-import json
 import time
 
-import paho.mqtt.client as mqtt
+from mqtt_common import add_mqtt_args, clean_text, make_client, parse_object, safe_handler
 
 DEFAULT = {"level": "idle", "text": "어린이 보호구역", "sub": "서행"}
 COLOR = {"idle": "\033[93m", "child": "\033[92m", "slow": "\033[33m", "danger": "\033[91m"}
@@ -32,35 +31,41 @@ class Controller:
         print(f"\033[2J\033[H{color}\n\n    ███  {sign.get('text', '')}  ███\n\n    {sign.get('sub', '')}\033[0m\n", flush=True)
 
 
+def to_sign(raw: dict | None) -> dict | None:
+    """허용한 필드만 골라 전광판 문구를 만든다. 문구의 제어 문자(터미널 조작 ESC 등)는 지운다."""
+    if raw is None or raw.get("level") not in COLOR:
+        return None
+    text = clean_text(raw.get("text"), 24)
+    return {"level": raw["level"], "text": text, "sub": clean_text(raw.get("sub"), 40)} if text else None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--vms", default="vms-zone")
-    ap.add_argument("--broker", default="localhost")
-    ap.add_argument("--port", type=int, default=1883)
     ap.add_argument("--stale-after", type=float, default=60)
+    add_mqtt_args(ap)
     args = ap.parse_args()
 
     out = Controller()
     status = f"streetlight/vms/{args.vms}/status"
     last = {"at": 0.0, "sign": DEFAULT}
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"vms-{args.vms}")
-    client.will_set(status, "offline", qos=1, retain=True)
+    client = make_client(args, f"vms-{args.vms}", status)
 
     def on_connect(c, *_):
         c.publish(status, "online", qos=1, retain=True)
         c.subscribe(f"streetlight/vms/{args.vms}/set", qos=1)
 
     def on_message(_c, _u, msg):
-        try:
-            sign = json.loads(msg.payload)
-        except ValueError:
+        sign = to_sign(parse_object(msg.payload))
+        if sign is None:
+            print("형식이 틀린 문구를 버림", flush=True)
             return
         last["at"], last["sign"] = time.time(), sign
         out.show(sign)
 
     client.on_connect = on_connect
-    client.on_message = on_message
+    client.on_message = safe_handler(args.vms, on_message)
     client.connect(args.broker, args.port, keepalive=30)
     client.loop_start()
     out.show(DEFAULT)

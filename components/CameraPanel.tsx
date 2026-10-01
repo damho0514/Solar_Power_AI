@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Icon from "@/components/Icon";
 import { LABELS, createEngine, type Engine } from "@/lib/detectors";
 import { GestureController, createHandEngine, type HandEngine, type Mode, type Point, type View } from "@/lib/gesture";
+import { handBus, useHandState } from "@/lib/handBus";
+import { MapGestureController, modeText, type MapMode } from "@/lib/mapGesture";
 import type { ClipRecorder } from "@/lib/clips";
 import { mask } from "@/lib/privacy";
 import { openCamera, type Facing, type Ptz } from "@/lib/ptz";
@@ -70,6 +72,11 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
   const [view, setView] = useState<View>(HOME);
   const viewRef = useRef(view);
   const [mode, setMode] = useState<Mode>("none");
+  // 손동작 대상이 "지도"이면 지도 뷰어(3D·로드뷰·2D)를 조작한다
+  const mapCtrlRef = useRef(new MapGestureController());
+  const [mapMode, setMapMode] = useState<MapMode>("none");
+  const [snapPending, setSnapPending] = useState(0);
+  const { target: handTarget, road } = useHandState();
   const [toast, setToast] = useState<{ text: string; id: number } | null>(null);
 
   onFrameRef.current = onFrame;
@@ -145,10 +152,12 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
           handRef.current = await createHandEngine();
           setHandLabel(handRef.current.label);
           setHandStatus("ready");
+          handBus.setStatus("ready");
         } catch (e) {
           // 손 제스처는 부가 기능이라 실패해도 카메라는 그대로 쓴다
           console.warn("손 제스처 사용 불가", e);
           setHandStatus("unavailable");
+          handBus.setStatus("unavailable", e instanceof Error ? e.message : String(e));
         }
       }
       setStatus("running");
@@ -203,16 +212,24 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
         const hand = handRef.current;
         const control = controlRef.current;
         if (hand && control && flipX) {
-          const handFrame = await hand.detect(video, now);
+          const hands = await hand.detect(video, now);
           if (stopped) return;
-          const step = control.update(handFrame, now, viewRef.current);
-          if (!sameView(step.view, viewRef.current)) {
-            viewRef.current = step.view;
-            setView(step.view);
+          if (handBus.get().target === "map") {
+            const step = mapCtrlRef.current.update(hands, now);
+            handBus.publish(step);
+            setMapMode(step.mode);
+            setSnapPending(step.snap?.pending ?? 0);
+            if (step.toast) setToast({ text: step.toast, id: now });
+          } else {
+            const step = control.update(hands[0] ?? null, now, viewRef.current);
+            if (!sameView(step.view, viewRef.current)) {
+              viewRef.current = step.view;
+              setView(step.view);
+            }
+            setMode(step.mode);
+            if (step.toast) setToast({ text: step.toast, id: now });
+            if (miniRef.current) drawMini(miniRef.current, step.view, step.palm, step.hold);
           }
-          setMode(step.mode);
-          if (step.toast) setToast({ text: step.toast, id: now });
-          if (miniRef.current) drawMini(miniRef.current, step.view, step.palm, step.hold);
         }
         frames++;
       } catch (e) {
@@ -239,8 +256,16 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
       (video?.srcObject as MediaStream | null)?.getTracks().forEach((t) => t.stop());
       engineRef.current?.close();
       handRef.current?.close();
+      handBus.setStatus("off");
     };
   }, []);
+
+  // 대상을 바꾸면 이전 대상의 손동작 상태를 버린다
+  useEffect(() => {
+    mapCtrlRef.current.reset();
+    setMapMode("none");
+    setMode("none");
+  }, [handTarget]);
 
   const gestures = status === "running" && handStatus === "ready" && mirror;
   return (
@@ -252,8 +277,14 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
         </div>
         {gestures && (
           <>
-            <span className={`camera-hud${mode === "none" ? "" : " on"}`}>{MODE_TEXT[mode]}</span>
-            <canvas ref={miniRef} className="camera-mini" width={96} height={72} aria-hidden />
+            {handTarget === "map" ? (
+              <span className={`camera-hud${mapMode === "none" ? "" : " on"}`}>{modeText(mapMode, road, snapPending)}</span>
+            ) : (
+              <>
+                <span className={`camera-hud${mode === "none" ? "" : " on"}`}>{MODE_TEXT[mode]}</span>
+                <canvas ref={miniRef} className="camera-mini" width={96} height={72} aria-hidden />
+              </>
+            )}
             {toast && (
               <div key={toast.id} className="camera-toast">
                 {toast.text}
@@ -293,9 +324,30 @@ export default function CameraPanel({ onFrame, onView, onStatus, tools, privacy 
         )}
         {help && gestures && (
           <div className="camera-help" onClick={() => setHelp(false)}>
-            <p><b>🖐 손 펴고 좌우로</b> 지도의 카메라 구간이 손을 따라가요{ptz ? " (카메라도 실제로 회전)" : ""}</p>
-            <p><b>✊ 주먹</b> 그 자리에 멈춰요</p>
-            <p><b>✌️ 1초 유지</b> 원래 자리로 돌아가요</p>
+            {handTarget === "map" ? (
+              <>
+                <p><b>🖐 손 펴고 움직이기</b> 지도를 돌려요 (2D는 이동)</p>
+                <p><b>🤏 집고 끌기</b> 지도를 잡고 옮겨요 (로드뷰는 걷기)</p>
+                <p><b>🤏🤏 두 손 집고 벌리기</b> 확대 · 모으면 축소 · 비틀면 회전</p>
+                <p><b>👍 / 👎</b> 확대 / 축소</p>
+                <p><b>✊ 주먹</b> 멈춤 (손을 옮긴 뒤 다시 펴면 이어서)</p>
+                <p><b>✌️ 1초 유지</b> 처음 시점으로</p>
+              </>
+            ) : (
+              <>
+                <p><b>🖐 손 펴고 좌우로</b> 지도의 카메라 구간이 손을 따라가요{ptz ? " (카메라도 실제로 회전)" : ""}</p>
+                <p><b>✊ 주먹</b> 그 자리에 멈춰요</p>
+                <p><b>✌️ 1초 유지</b> 원래 자리로 돌아가요</p>
+              </>
+            )}
+            <div className="seg-mini inline" role="radiogroup" aria-label="손동작 대상" onClick={(e) => e.stopPropagation()}>
+              <button role="radio" aria-checked={handTarget === "map"} className={handTarget === "map" ? "on" : ""} onClick={() => handBus.setTarget("map")}>
+                지도 조작
+              </button>
+              <button role="radio" aria-checked={handTarget === "camera"} className={handTarget === "camera" ? "on" : ""} onClick={() => handBus.setTarget("camera")}>
+                카메라 구간
+              </button>
+            </div>
           </div>
         )}
       </div>

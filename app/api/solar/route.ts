@@ -2,6 +2,7 @@
 // 예보 출처: KMA_SERVICE_KEY 환경변수가 있으면 기상청 단기예보, 없으면 Open-Meteo(인증키 불필요).
 // 설치 지점은 모델을 학습한 지점(public/models/solar-gbr.json의 site)을 쓴다.
 
+import { rateLimit } from "@/lib/server/guard";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { cloudToSky, latLonToGrid, predictHourWh, type HourWeather, type SolarModel } from "@/lib/solar";
@@ -68,7 +69,15 @@ async function fromOpenMeteo(lat: number, lon: number, date: string): Promise<Ho
   });
 }
 
-export async function GET() {
+// 내일 예보는 몇 시간 단위로만 바뀐다. 30분 동안 같은 답을 돌려줘 외부 API를 아끼고, 요청이 몰려도 버틴다
+const TTL_MS = 30 * 60_000;
+let memo: { at: number; date: string; body: unknown } | null = null;
+
+export async function GET(req: Request) {
+  const limited = rateLimit(req, "solar", 30, 60_000);
+  if (limited) return limited;
+  const today = kstDate(1);
+  if (memo && memo.date === today && Date.now() - memo.at < TTL_MS) return Response.json(memo.body);
   const model: SolarModel = JSON.parse(await readFile(path.join(process.cwd(), "public/models/solar-gbr.json"), "utf8"));
   const { lat, lon } = model.site;
   const date = kstDate(1);
@@ -77,18 +86,19 @@ export async function GET() {
   try {
     hours = KMA_KEY ? await fromKma(lat, lon, date) : await fromOpenMeteo(lat, lon, date);
   } catch (e) {
-    if (!KMA_KEY) return Response.json({ error: String(e) }, { status: 502 });
+    console.error("[api solar] 예보 조회 실패", e);
+    if (!KMA_KEY) return Response.json({ error: "기상 예보를 받지 못했어요. 잠시 뒤 다시 시도하세요." }, { status: 502 });
     // 기상청이 안 되면 Open-Meteo로 대신하고 그 사실을 알린다
-    hours = await fromOpenMeteo(lat, lon, date);
-    source = `Open-Meteo 예보 (기상청 실패: ${e instanceof Error ? e.message : e})`;
+    try {
+      hours = await fromOpenMeteo(lat, lon, date);
+    } catch (e2) {
+      console.error("[api solar] Open-Meteo도 실패", e2);
+      return Response.json({ error: "기상 예보를 받지 못했어요. 잠시 뒤 다시 시도하세요." }, { status: 502 });
+    }
+    source = "Open-Meteo 예보 (기상청 조회 실패로 대체)";
   }
   const hourly = hours.map((w) => ({ ...w, wh: predictHourWh(model, w) }));
-  return Response.json({
-    date,
-    source,
-    site: model.site,
-    panelWp: model.panelWp,
-    totalWh: hourly.reduce((s, h) => s + h.wh, 0),
-    hourly,
-  });
+  const body = { date, source, site: model.site, panelWp: model.panelWp, totalWh: hourly.reduce((s, h) => s + h.wh, 0), hourly };
+  memo = { at: Date.now(), date, body };
+  return Response.json(body);
 }

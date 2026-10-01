@@ -20,11 +20,14 @@ type SearchRow = {
 };
 type ArticleRow = { 조제목?: string; 조내용?: string; 조문여부?: string };
 
+const CACHE_MAX = 500;
 const cache = new Map<string, { at: number; value: unknown }>();
 async function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < DAY) return hit.value as T;
   const value = await load();
+  // 지자체 이름은 요청에서 오므로 마음대로 많은 키를 만들 수 있다. 오래된 것부터 지워 메모리를 지킨다
+  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value!);
   cache.set(key, { at: Date.now(), value });
   return value;
 }

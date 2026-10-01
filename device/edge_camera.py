@@ -21,7 +21,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import paho.mqtt.client as mqtt
+from mqtt_common import add_mqtt_args, make_client
 from ai_edge_litert.interpreter import Interpreter
 
 HERE = Path(__file__).resolve().parent
@@ -107,18 +107,16 @@ def frames(args):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--camera", default="cam-1")
-    ap.add_argument("--broker", default="localhost")
-    ap.add_argument("--port", type=int, default=1883)
     ap.add_argument("--source", default="0", help="웹캠 번호, 영상 파일 경로, 또는 picamera2")
     ap.add_argument("--demo-image", help="카메라 대신 이 사진 속 사람이 좌우로 지나가는 가짜 영상을 쓴다")
     ap.add_argument("--fps", type=float, default=10)
     ap.add_argument("--seconds", type=float, default=0, help="이 시간만큼 돌고 끝냄 (0 = 계속)")
+    add_mqtt_args(ap)
     args = ap.parse_args()
 
     detect = Detector()
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"camera-{args.camera}")
     topic = f"streetlight/camera/{args.camera}"
-    client.will_set(f"{topic}/status", "offline", qos=1, retain=True)
+    client = make_client(args, f"camera-{args.camera}", f"{topic}/status")
     client.connect(args.broker, args.port, keepalive=30)
     client.loop_start()
     client.publish(f"{topic}/status", "online", qos=1, retain=True)

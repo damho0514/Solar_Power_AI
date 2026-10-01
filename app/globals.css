@@ -2562,3 +2562,225 @@ button {
   margin-bottom: 6px;
   color: var(--text-2);
 }
+
+/* ---------- 손동작 지도 조작 (components/GestureHud.tsx) ---------- */
+.seg-mini.inline {
+  position: static;
+}
+
+.ghud {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.ghud-bar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 120px); /* 오른쪽 위 3D/2D 전환과 겹치지 않게 */
+  flex-wrap: wrap;
+  pointer-events: auto;
+}
+
+.ghud-chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(10, 15, 26, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #9aa6bd;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ghud-chip.on {
+  color: #7ee787;
+  box-shadow: 0 0 0 1px rgba(126, 231, 135, 0.5);
+}
+
+.ghud-help-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  background: rgba(10, 15, 26, 0.72);
+  color: #dbe3f1;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ghud-help {
+  position: absolute;
+  top: 48px;
+  left: 10px;
+  max-width: min(340px, calc(100% - 20px));
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(10, 15, 26, 0.9);
+  color: #dbe3f1;
+  font-size: 12.5px;
+  line-height: 1.5;
+  pointer-events: auto;
+}
+
+.ghud-help p {
+  margin: 2px 0;
+}
+
+.ghud-cursor {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  border: 2.5px solid #7ee787;
+  border-radius: 50%;
+  box-shadow: 0 0 10px rgba(126, 231, 135, 0.6);
+  transition:
+    left 60ms linear,
+    top 60ms linear;
+}
+
+.ghud-cursor.pinch {
+  background: rgba(126, 231, 135, 0.45);
+  transform: scale(0.8);
+}
+
+.ghud-hold {
+  position: absolute;
+  inset: -8px;
+  width: 38px;
+  height: 38px;
+  fill: none;
+  stroke: #7ee787;
+  stroke-width: 3;
+  transform: rotate(-90deg);
+}
+
+.road-bar {
+  position: absolute;
+  z-index: 5;
+  left: 10px;
+  bottom: 70px; /* 시점 버튼 줄 바로 위. 오른쪽 아래는 떠 있는 카메라 창이 가린다 */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.road-bar button {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(10, 15, 26, 0.72);
+  color: #dbe3f1;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.road-bar button.on {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.map.zoomed {
+  touch-action: none; /* 확대한 2D 지도를 손가락으로 끌 때 페이지가 스크롤되지 않게 */
+  cursor: grab;
+}
+
+.map-reset {
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .road-bar {
+    bottom: 104px; /* 좁은 화면에서는 시점 버튼이 두 줄로 접힌다 */
+  }
+}
+
+/* 🫰 스냅 매크로 */
+.ghud-macros {
+  position: absolute;
+  top: 52px;
+  right: 10px;
+  display: flex;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.ghud-macros button {
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(10, 15, 26, 0.72);
+  color: #dbe3f1;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ghud-macros button b {
+  color: var(--amber);
+}
+
+.ghud-macros button.on {
+  border-color: #7ee787;
+  color: #7ee787;
+}
+
+.ghud-macro {
+  position: absolute;
+  left: 50%;
+  top: 56px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 20px);
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(10, 15, 26, 0.85);
+  box-shadow: 0 0 0 1px rgba(126, 231, 135, 0.6);
+  color: #dbe3f1;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.ghud-macro.missing {
+  box-shadow: 0 0 0 1px rgba(255, 176, 32, 0.6);
+  color: var(--amber);
+}
+
+/* 손이 지도를 끌어가는 듯한 작은 손 */
+.ghud-ghost {
+  display: inline-block;
+  animation: ghud-drag 1.2s ease-in-out infinite;
+}
+
+@keyframes ghud-drag {
+  0%,
+  100% {
+    transform: translate(-4px, 0) rotate(-8deg);
+  }
+  50% {
+    transform: translate(6px, 2px) rotate(6deg);
+  }
+}
+
+@media (max-width: 640px) {
+  .ghud-macros {
+    top: auto;
+    bottom: 140px; /* 로드뷰 버튼 줄(104px) 위 */
+    right: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ghud-ghost {
+    animation: none;
+  }
+}

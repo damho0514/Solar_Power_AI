@@ -1,6 +1,7 @@
 // 주소 → 토지(지목·용도지역·구역) 조회 → 관할 지자체 조례 수집 → 이격거리 기준 추출.
 // 판정(assess)은 화면에서 거리 입력에 따라 다시 계산하므로 원자료만 돌려준다.
 
+import { fail, guardJson } from "@/lib/server/guard";
 import { hasVworldKey, lookupLand, parseRegion } from "@/lib/land";
 import { findOrdinances, solarArticles, type Article, type Ordinance } from "@/lib/ordinance";
 import { extractSetbacks, type Land } from "@/lib/siting";
@@ -22,8 +23,15 @@ export async function GET() {
   return Response.json({ vworld: hasVworldKey() });
 }
 
+// 한 번 조회에 브이월드·법제처를 여러 번 부르므로 횟수를 엄격히 제한한다 (무료 할당량 보호)
+const LIMITS = { maxStr: 200, maxArr: 30, maxDepth: 4, maxKeys: 20 };
+
 export async function POST(req: Request) {
-  const body = (await req.json()) as SitingInput;
+  const g = await guardJson(req, { name: "siting", limit: 10, maxBytes: 8_000, clamp: LIMITS });
+  if (!g.ok) return g.res;
+  const body = g.body as SitingInput;
+  if (!body || typeof body !== "object" || ("manual" in body ? typeof body.manual?.address !== "string" : typeof body.address !== "string"))
+    return fail(400, "주소를 입력하세요");
   let land: Land;
   try {
     if ("manual" in body) {
@@ -46,7 +54,7 @@ export async function POST(req: Request) {
       land = await lookupLand(body.address);
     }
   } catch (e) {
-    return new Response(e instanceof Error ? e.message : String(e), { status: 502 });
+    return fail(502, "토지 정보를 조회하지 못했어요. 주소를 확인하거나 '직접 입력'을 쓰세요.", e);
   }
   if (!land.sido) return new Response("주소에서 시·도를 알아내지 못했습니다. '경상북도 영양군 …'처럼 시·도부터 입력하세요.", { status: 400 });
 
@@ -59,7 +67,8 @@ export async function POST(req: Request) {
     const perOrd = await Promise.all(
       found.map((o) =>
         solarArticles(o).catch((e) => {
-          warnings.push(`${o.name} 본문을 받지 못했습니다: ${e instanceof Error ? e.message : e}`);
+          console.error(`[api siting] ${o.name} 본문 실패`, e);
+          warnings.push(`${o.name} 본문을 받지 못했습니다.`);
           return [] as Article[];
         }),
       ),
@@ -67,7 +76,8 @@ export async function POST(req: Request) {
     ordinances = found.map((o, i) => ({ ...o, articles: perOrd[i].length }));
     articles = perOrd.flat();
   } catch (e) {
-    warnings.push(`법제처 조례 조회 실패: ${e instanceof Error ? e.message : e}`);
+    console.error("[api siting] 법제처 조회 실패", e);
+    warnings.push("법제처 조례 조회에 실패했습니다. 잠시 뒤 다시 시도하세요.");
   }
 
   const { setbacks, slopes } = extractSetbacks(articles);
